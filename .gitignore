@@ -10,14 +10,11 @@
 # and don't ignore files ending with ".m"
 !*.m
 
-# and don't ignore files ending with ".txt"
-#!*.txt
-
 # and don't ignore files ending with ".py"
-#!*.py
+!*.py
 
 # and don't ignore files ending with ".r"
-#!*.r
+!*.r
 
 # and don't ignore files ending with ".R"
-#!*.R
+!*.R
