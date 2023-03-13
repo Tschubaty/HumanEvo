@@ -12,3 +12,12 @@
 
 # and don't ignore files ending with ".txt"
 #!*.txt
+
+# and don't ignore files ending with ".py"
+#!*.py
+
+# and don't ignore files ending with ".r"
+#!*.r
+
+# and don't ignore files ending with ".R"
+#!*.R
