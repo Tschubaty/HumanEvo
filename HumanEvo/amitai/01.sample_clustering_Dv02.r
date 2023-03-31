@@ -299,34 +299,45 @@ cor.test(x = as.numeric(df_chr[i,]),
 
 p_vals <- numeric(nrow(df_chr))
 
-for (data_row  in 1:10) {
-  
-  print(p)
-  if (sum(!is.na(df_vhrdata_row) <= 5)) {
-    p <- NA
-  }else{
-    p <- cor.test(
-      x = as.numeric(data_row),
-      y = SAMPLE_AGE,
-      method = "kendall"
-    )
-  }
-  
-  p_vals[data_row] <- p
-}
-
-    if (sum(!is.na(data_row) <= 5)) {
-      return(NA)
-    } else{
-      return(cor.test(
-        x = as.numeric(data_row),
-        y = SAMPLE_AGE,
-        method = "kendall"
-      ))
-    }
-)
+df_p <- data.frame(chr = CHR_NAMES[chr],minus_log_p_vals = -log(p_vals))
 
 
+saveRDS(object = df_p,file = file.path(OUTPUT_FOLDER,paste(CHR_NAMES[chr],"p_val","rds",sep = ".")))
+
+#
+df_p$chr[is.na(df_p$minus_log_p_vals)] <- CHR_NAMES[21]
+df_p$minus_log_p_vals[is.na(df_p$minus_log_p_vals)] <- -log(0.99)
+
+ggplot(data = df_p[1:10000,],mapping = aes(x = chr,y = minus_log_p_vals))+
+  geom_point(position=position_dodge(width=0.3))+
+  scale_y_continuous(trans='log10')
+
+position=position_dodge(0.3)
+
+
+ggplot(data = df_p[1:578097,],mapping = aes(x =minus_log_p_vals)) +
+  geom_histogram()
+
+which.max(df_p$minus_log_p_vals)
+
+
+
+df_best <- data.frame(age =SAMPLE_AGE, meth = as.numeric(as.vector(df_chr[which.max(df_p$minus_log_p_vals),])))
+df_best <- data.frame(age =SAMPLE_AGE, 
+                      meth = as.numeric(as.vector(
+                        df_chr[
+                          df_p$minus_log_p_vals == head(sort(df_p$minus_log_p_vals,decreasing = T),1000)[400],])))
+
+
+#6.164671
+
+p_best <- ggplot(data = df_best ,aes(x = age,y = meth)) + geom_point()+
+  ggplot2::theme(
+    axis.line = ggplot2::element_line(colour = "black"),
+    panel.background = ggplot2::element_blank(),
+    legend.position = "none",
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)
+  )
 
 
 #   df_chr_unique <- unique(df_chr) # Remove duplicates
