@@ -351,7 +351,7 @@ for(s in 1:length(state_order)){
 
 
 p_genome <- ggplot(data = meta,mapping = aes(x = state,y = total_bp,fill = state))+geom_bar(stat = "identity")+
-  ggtitle("HG38 genome wide Chromatin state destribution")+
+ggtitle(paste(ANNOTATION,"genome wide Chromatin state destribution",sep = " "))+
   ggplot2::theme(
       axis.line = ggplot2::element_line(colour = "black"),
       panel.background = ggplot2::element_blank(),
@@ -360,7 +360,7 @@ p_genome <- ggplot(data = meta,mapping = aes(x = state,y = total_bp,fill = state
     )
   
 ggsave(filename =   file.path(OUTPUT_FOLDER,
-                              paste("genome_state_destribution_hg38lift_genome_100_segments", "png", sep = ".")),plot = p_genome)
+                              paste("genome_state_destribution",chromatin_seg_annotaion_name, "png", sep = ".")),plot = p_genome)
 ################################
 
 #annotate chip to chromatin state
@@ -416,7 +416,7 @@ compute_chromatin_state_destribution <-
 
 
 H3K27ac_annotation_filename <- file.path(OUTPUT_FOLDER,
-          paste("H3K27ac_annotation", "RDS", sep = "."))
+        paste("H3K27ac_annotation",ANNOTATION, "RDS", sep = "."))
 
 if(file.exists(H3K27ac_annotation_filename )){
   H3K27ac_annotation <- readRDS(file = H3K27ac_annotation_filename )
@@ -426,7 +426,7 @@ if(file.exists(H3K27ac_annotation_filename )){
 }
 
 p_H3K27ac <- ggplot(data = H3K27ac_annotation,mapping = aes(x = state,y = bp,fill = state))+geom_bar(stat = "identity")+
-  ggtitle("HG38 pooled CHIP H3K27ac annotation")+
+ggtitle(paste(ANNOTATION,"pooled CHIP H3K27ac annotation",sep = " "))+
   ggplot2::theme(
     axis.line = ggplot2::element_line(colour = "black"),
     panel.background = ggplot2::element_blank(),
@@ -435,8 +435,8 @@ p_H3K27ac <- ggplot(data = H3K27ac_annotation,mapping = aes(x = state,y = bp,fil
   )
 
 ggsave(filename =   file.path(OUTPUT_FOLDER,
-                              paste("H3K27ac_annotation_hg38lift_genome_100_segments", "png", sep = ".")),plot = p_H3K27ac)
-################################
+                              paste("H3K27ac_annotation",chromatin_seg_annotaion_name, "png", sep = ".")),plot = p_H3K27ac)
+################################################################################
 
 
 # data_type = "sim" #united
