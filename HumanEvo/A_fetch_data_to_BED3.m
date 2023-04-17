@@ -3,14 +3,68 @@
 % read methylation files 
 %
 %
-
+%% load liran meta data
 %meta = readtable('Meth samples - human, apes, mammoth.xlsx','Sheet');
 meta= readtable('Meth samples - human, apes, mammoth.xlsx','Sheet','Ancient');
 
-% delete empty rows 
 
+% delete empty rows 
 empty_rows = cellfun('isempty', meta.Sample);
 meta=meta(~empty_rows ,:);
+
+%% load Allen Ancient Genome Diversity Project from https://reich.hms.harvard.edu/ancient-genome-diversity-project
+AGDP_meta = readtable('AGDP.metadata.xlsx');
+
+%% availble data
+
+available_data = {};
+
+for i=1:numel(AGDP_meta.I_ID)
+
+    disp(strcat("AGDP is is: ",AGDP_meta.I_ID{i})); 
+
+    pattern =  strcat('p_CpGs/*',erase(AGDP_meta.I_ID{i},lettersPattern),'*.mat'); % sprintf('p_CpGs/*f_%d.mat',AGDP_meta.I_ID{i});
+
+    disp("search pattern");
+    disp(pattern);
+    d=dir(pattern);
+    if numel(d) > 0
+    available_data{end +1} = AGDP_meta.I_ID{i};
+    end
+
+  for j=1:numel(d)
+    fname=d(j).name;
+    % process each file here...
+    disp(fname);
+  end
+end
+
+
+
+
+% matlab_files =  dir("p_CpGs/*.mat");
+% 
+% pat = "f_5725*";
+% substr = "f_5725*";
+% str = {matlab_files.name};
+% TF = matches(str,pat,IgnoreCase=true);
+% 
+% dir("p_CpGs/*5725*.mat")
+% 
+% tf = contains(str,substr,IgnoreCase=true);
+
+% weeklyDates = [20101031;20101107;...];
+% for i=1:numel(weeklyDates)
+%   pattern=sprintf('*%d*.nc',weeklyDates(i));
+%   d=dir(pattern);
+%   for j=1:numel(d)
+%     fname=d(j).name;
+%     % process each file here...
+%   end
+% end
+%%
+
+
 
 %loc=cellfun('isempty', meta.Sample );
 
