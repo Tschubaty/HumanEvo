@@ -1,349 +1,109 @@
 
-% v 01 04.04.2023
-% read methylation files 
+% v 01 18.04.2023
+% read methylation files
 %
-%
-%% load liran meta data
-%meta = readtable('Meth samples - human, apes, mammoth.xlsx','Sheet');
-meta= readtable('Meth samples - human, apes, mammoth.xlsx','Sheet','Ancient');
+%% include github repo
+git_folder = 'C:\Users\Daniel Batyrev\Documents\GitHub\RoAM';
+addpath(genpath(git_folder));
+
+%% consrtans and paramter 
+
+INPUT_FOLDER = "p_CpGs";
+OUTPUT_FOLDER = "methylation_data";
+
+%% load genomic coordinates
+load(fullfile(INPUT_FOLDER,"gc_CpGs.mat"));
 
 
-% delete empty rows 
-empty_rows = cellfun('isempty', meta.Sample);
-meta=meta(~empty_rows ,:);
+% load('C:\Users\amitai\Google Drive\p_CpGs\gc_CpGs.mat');
+% 
+% chr1 = gc_CpGs.coordinates{1,1};
+% chr2 = gc_CpGs.coordinates{1,2};
+% chr3 = gc_CpGs.coordinates{1,3};
+% chr4 = gc_CpGs.coordinates{1,4};
+% chr5 = gc_CpGs.coordinates{1,5};
+% chr6 = gc_CpGs.coordinates{1,6};
+% chr7 = gc_CpGs.coordinates{1,7};
+% chr8 = gc_CpGs.coordinates{1,8};
+% chr9 = gc_CpGs.coordinates{1,9};
+% chr10 = gc_CpGs.coordinates{1,10};
+% chr11 = gc_CpGs.coordinates{1,11};
+% chr12 = gc_CpGs.coordinates{1,12};
+% chr13 = gc_CpGs.coordinates{1,13};
+% chr14 = gc_CpGs.coordinates{1,14};
+% chr15 = gc_CpGs.coordinates{1,15};
+% chr16 = gc_CpGs.coordinates{1,16};
+% chr17 = gc_CpGs.coordinates{1,17};
+% chr18 = gc_CpGs.coordinates{1,18};
+% chr19 = gc_CpGs.coordinates{1,19};
+% chr20 = gc_CpGs.coordinates{1,20};
+% chr21 = gc_CpGs.coordinates{1,21};
+% chr22 = gc_CpGs.coordinates{1,22};
+% 
+% 
+% fn = strcat('genomic_locations.csv') ;
+% 
+% T = 
+%(chr1, chr2 ,chr3 ,chr4 ,chr5 ,chr6 ,chr7 ,chr8 ,chr9 ,chr10 ,chr11 ,chr12 ,chr13 ,chr14 ,chr15 ,chr16 ,chr17 ,chr18 ,chr19 ,chr20 ,chr21 ,chr22);
+% 
+% 
+% dlmwrite(fn, T, 'precision', '%i');
 
-%% load Allen Ancient Genome Diversity Project from https://reich.hms.harvard.edu/ancient-genome-diversity-project
-AGDP_meta = readtable('AGDP.metadata.xlsx');
 
-%% availble data
+%%
+reg_expression =  fullfile(INPUT_FOLDER,"*.mat");
+files = dir(reg_expression);
+pat = "f_" + digitsPattern(4) + ".mat";
 
-available_data = {};
 
-for i=1:numel(AGDP_meta.I_ID)
+samples = {};
 
-    disp(strcat("AGDP is is: ",AGDP_meta.I_ID{i})); 
 
-    pattern =  strcat('p_CpGs/*',erase(AGDP_meta.I_ID{i},lettersPattern),'*.mat'); % sprintf('p_CpGs/*f_%d.mat',AGDP_meta.I_ID{i});
+for i =1:numel(files)
+    if matches(files(i).name,pat)
+        fprintf("start loading %s \n",files(i).name)
+        samples{end +1} = files(i).name;
+        load(fullfile(INPUT_FOLDER,files(i).name));
+        sample_name = strcat("I",  erase(erase(files(i).name,"f_"),".mat"));
 
-    disp("search pattern");
-    disp(pattern);
-    d=dir(pattern);
-    if numel(d) > 0
-    available_data{end +1} = AGDP_meta.I_ID{i};
+        for chromosome_number = 1:22
+            
+            % chrom - The name of the chromosome (e.g. chr3, chrY, chr2_random)
+            % chromStart - The starting position of the feature in the chromosome or scaffold.
+            %               The first base in a chromosome is numbered 0.
+            % chromEnd -The ending position of the feature in the chromosome or scaffold. 
+            %               The chromEnd base is not included in the display of the feature, 
+            %               however, the number in position format will be represented. 
+            %               For example, the first 100 bases of chromosome 1 are defined as
+            %               chrom=1, chromStart=0, chromEnd=100, and span the bases numbered 0-99 in our software (not 0-100),
+            %               but will represent the position notation chr1:1-100. 
+            % name - Defines the name of the BED line. This label is displayed to the left of the BED line in the Genome Browser window 
+            %           when the track is open to full display mode or directly to the left of the item in pack mode.
+            % score - A score between 0 and 1. 
+            % strand - Defines the strand. Either "." (=no strand) or "+" or "-".
+        varTypes = ["string","int32","int32","string","double","string"];
+        varNames = ["chrom","start","end","name","score","strand"];
+        bed_length = numel(gc_CpGs.coordinates{chromosome_number});
+        sz = [bed_length numel(varTypes)];
+        
+
+        df = table('Size',sz,'VariableTypes',varTypes,'VariableNames',varNames);
+        
+        df.chrom(:) = gc_CpGs.chr_names{chromosome_number};
+        df.start(:) = gc_CpGs.coordinates{chromosome_number};
+        df.end(:) = gc_CpGs.coordinates{chromosome_number};
+        df.name(:) = sample_name;
+        df.score(:) = fas.getmethylation(chromosome_number);
+        df.strand(:) = "+";
+
+        writetable(df, fullfile(OUTPUT_FOLDER, ...
+            strcat(sample_name,".",gc_CpGs.chr_names{chromosome_number},".bed")), ...
+            'Delimiter','\t','FileType',"text");  
+
+        fprintf("chromosome %d saved \n",chromosome_number);
+        end
     end
-
-  for j=1:numel(d)
-    fname=d(j).name;
-    % process each file here...
-    disp(fname);
-  end
 end
 
 
-
-
-% matlab_files =  dir("p_CpGs/*.mat");
-% 
-% pat = "f_5725*";
-% substr = "f_5725*";
-% str = {matlab_files.name};
-% TF = matches(str,pat,IgnoreCase=true);
-% 
-% dir("p_CpGs/*5725*.mat")
-% 
-% tf = contains(str,substr,IgnoreCase=true);
-
-% weeklyDates = [20101031;20101107;...];
-% for i=1:numel(weeklyDates)
-%   pattern=sprintf('*%d*.nc',weeklyDates(i));
-%   d=dir(pattern);
-%   for j=1:numel(d)
-%     fname=d(j).name;
-%     % process each file here...
-%   end
-% end
-%%
-
-
-
-%loc=cellfun('isempty', meta.Sample );
-
-%meta=  rmmissing(meta);
-
-% 'Range','A1:E11'
-% a = 1;
-% while(a<24)
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1116.mat');
-%     samp0 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5319.mat');
-%     samp1 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4532.mat');
-%     samp2 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2862.mat');
-%     samp3 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4529.mat');
-%     samp4 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3758.mat');
-%     samp5 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5725.mat');
-%     samp6 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2861.mat');
-%     samp7 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3957.mat');
-%     samp8 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3565.mat');
-%     samp9 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4792.mat');
-%     samp10 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4775.mat');
-%     samp11 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4315.mat');
-%     samp12 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1053.mat');
-%     samp13 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_7421.mat');
-%     samp14 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3255.mat');
-%     samp15 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5835.mat');
-%     samp16 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2514.mat');
-%     samp17 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5748.mat');
-%     samp18 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1633.mat');
-%     samp19 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5950.mat');
-%     samp20 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5838.mat');
-%     samp21 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5742.mat');
-%     samp22 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5743.mat');
-%     samp23 = simu_fas.getmethylation(a);
-%  %   load('C:\Users\amitai\Google Drive\p_CpGs\simu_2105.mat'); % no simu
-%  %   pasturalist
-%   %  samp24 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2520.mat');
-%     samp25 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2935.mat');
-%     samp26 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2978.mat');
-%     samp27 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2980.mat');
-%     samp28 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3133.mat');
-%     samp29 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4634.mat');
-%     samp30 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1965.mat');
-%     samp31 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1631.mat');
-%     samp32 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1632.mat');
-%     samp33 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1961.mat');
-%     samp34 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_LBK.mat'); 
-%     samp35 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1496.mat');
-%     samp36 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5077.mat');
-%     samp37 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1962.mat');
-%     samp38 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4438.mat');
-%     samp39 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_I15.mat');
-%     samp40 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2134.mat');
-%     samp41 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1507.mat');
-%     samp42 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4878.mat');
-%     samp43 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4432.mat');
-%     samp44 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4873.mat');
-%     samp45 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_Los.mat');
-%     samp46 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_LaB.mat'); 
-%     samp47 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4596.mat');
-%     samp48 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5233.mat');
-%     samp49 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_0708.mat');
-%     samp50 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1960.mat');
-%     samp51 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4914.mat');
-%     samp52 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4875.mat');
-%     samp53 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4877.mat');
-%     samp54 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2139.mat');
-%     samp55 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_SF1.mat'); 
-%     samp56 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1734.mat');
-%     samp57 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5236.mat');
-%     samp58 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5235.mat');
-%     samp59 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_M45.mat'); 
-%     samp60 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_Ust.mat'); 
-%     samp61 = simu_fas.getmethylation(a);
-% 
-%     fn = strcat('chr_',num2str(a),'_simu_united.csv') ;
-% 
-%     T = [samp0 samp1 samp2 samp3 samp4 samp5 samp6 samp7 samp8 samp9 samp10 samp11 samp12 samp13 samp14 samp15 samp16 samp17 samp18 samp19 samp20 samp21 samp22 samp23 samp25 samp26 samp27 samp28 samp29 samp30 samp31 samp32 samp33 samp34 samp35 samp36 samp37 samp38 samp39 samp40 samp41 samp42 samp43 samp44 samp45 samp46 samp47 samp48 samp49 samp50 samp51 samp52 samp53 samp54 samp55 samp56 samp57 samp58 samp59 samp60 samp61 ];
-% 
-%     csvwrite(fn, T);
-% 
-%     a = a+1;
-% end
-
-
-% a = 1;
-% while(a<24)
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1116.mat');
-%     samp0 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5319.mat');
-%     samp1 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4532.mat');
-%     samp2 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2862.mat');
-%     samp3 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4529.mat');
-%     samp4 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3758.mat');
-%     samp5 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5725.mat');
-%     samp6 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2861.mat');
-%     samp7 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3957.mat');
-%     samp8 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3565.mat');
-%     samp9 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4792.mat');
-%     samp10 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4775.mat');
-%     samp11 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4315.mat');
-%     samp12 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1053.mat');
-%     samp13 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_7421.mat');
-%     samp14 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3255.mat');
-%     samp15 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5835.mat');
-%     samp16 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2514.mat');
-%     samp17 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5748.mat');
-%     samp18 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1633.mat');
-%     samp19 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5950.mat');
-%     samp20 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5838.mat');
-%     samp21 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5742.mat');
-%     samp22 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5743.mat');
-%     samp23 = simu_fas.getmethylation(a);
-%  %   load('C:\Users\amitai\Google Drive\p_CpGs\simu_2105.mat'); % no simu
-%  %   pasturalist
-%   %  samp24 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2520.mat');
-%     samp25 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2935.mat');
-%     samp26 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2978.mat');
-%     samp27 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2980.mat');
-%     samp28 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_3133.mat');
-%     samp29 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4634.mat');
-%     samp30 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1965.mat');
-%     samp31 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1631.mat');
-%     samp32 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1632.mat');
-%     samp33 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1961.mat');
-%     samp34 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_LBK.mat'); 
-%     samp35 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1496.mat');
-%     samp36 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5077.mat');
-%     samp37 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1962.mat');
-%     samp38 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4438.mat');
-%     samp39 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_I15.mat');
-%     samp40 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2134.mat');
-%     samp41 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1507.mat');
-%     samp42 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4878.mat');
-%     samp43 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4432.mat');
-%     samp44 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4873.mat');
-%     samp45 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_Los.mat');
-%     samp46 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_LaB.mat'); 
-%     samp47 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4596.mat');
-%     samp48 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5233.mat');
-%     samp49 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_0708.mat');
-%     samp50 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1960.mat');
-%     samp51 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4914.mat');
-%     samp52 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4875.mat');
-%     samp53 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_4877.mat');
-%     samp54 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_2139.mat');
-%     samp55 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_SF1.mat'); 
-%     samp56 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_1734.mat');
-%     samp57 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5236.mat');
-%     samp58 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_5235.mat');
-%     samp59 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_M45.mat'); 
-%     samp60 = simu_fas.getmethylation(a);
-%     load('C:\Users\amitai\Google Drive\p_CpGs\simu_Ust.mat'); 
-%     samp61 = simu_fas.getmethylation(a);
-% 
-%     fn = strcat('chr_',num2str(a),'_simu_united.csv') ;
-% 
-%     T = [samp0 samp1 samp2 samp3 samp4 samp5 samp6 samp7 samp8 samp9 samp10 samp11 samp12 samp13 samp14 samp15 samp16 samp17 samp18 samp19 samp20 samp21 samp22 samp23 samp25 samp26 samp27 samp28 samp29 samp30 samp31 samp32 samp33 samp34 samp35 samp36 samp37 samp38 samp39 samp40 samp41 samp42 samp43 samp44 samp45 samp46 samp47 samp48 samp49 samp50 samp51 samp52 samp53 samp54 samp55 samp56 samp57 samp58 samp59 samp60 samp61 ];
-% 
-%     csvwrite(fn, T);
-% 
-%     a = a+1;
-% end
-% 
-% 
+numel(samples)
