@@ -14,15 +14,21 @@ OUTPUT_FOLDER = "methylation_data";
 %% load genomic coordinates
 load(fullfile(INPUT_FOLDER,"gc_CpGs.mat"));
 
-%%
+%% ini loop
 reg_expression =  fullfile(INPUT_FOLDER,"*.mat");
 files = dir(reg_expression);
 pat = "f_" + digitsPattern(4) + ".mat";
-
-
 samples = {};
+%%
+diary myDiaryFile.txt 
+for i =1:numel(files)
+        fprintf("start loading %s \n",files(i).name);
+        load(fullfile(INPUT_FOLDER,files(i).name));
+        disp(fas.methylation);
+end
+diary off
 
-
+%% start loop
 for i =1:numel(files)
     if matches(files(i).name,pat)
         fprintf("start loading %s \n",files(i).name)

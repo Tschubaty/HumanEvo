@@ -85,11 +85,11 @@ CHR_NAMES <-
 
 meta <- readRDS(file = file.path("03.plots",paste("meta","rds",sep = ".")))
 
-df <- readRDS(file.path(INPUT_FOLDER,paste("H3K27ac","only",N_SAMPLES,"samples","merged",ANNOTATION,"rds",sep = ".")))
+df <- readRDS(file.path(INPUT_FOLDER,"H3K27ac.peak.mean.methylation.39.samples.merged.hg19.rds"))
 # compute in score how many samples 
-df$score <- apply(df[,c(7:ncol(df))], 1 ,FUN = function(r) {sum(!is.na(r))})
+df$n_samples  <- apply(df[,c(7:ncol(df))], 1 ,FUN = function(r) {sum(!is.na(r))})
 
-df <- df[df$score == N_SAMPLES,]
+df <- df[df$n_samples == N_SAMPLES,]
 
 ################################################
 
@@ -127,8 +127,8 @@ df$pearson_cor <- sapply(cor_tests , FUN = function(r){r$statistic})
 
 
 saveRDS(object = df,file = file.path(OUTPUT_FOLDER,
-                                     paste("4b"
-                                       ,"H3K27ac",
+                                     paste("4c"
+                                       ,"H3K27ac.peak",
                                            "with",
                                            "pearson",
                                            N_SAMPLES,
@@ -194,28 +194,28 @@ for(rep in 1:n_repetitions){
   
   print(end_time - start_time)
   
-  st=format(end_time, "%Y-%m-%d_%H.%M")
-  file_name <- paste("pearson_p_val","methylation", "shuffle",st, "rds", sep = ".")
+  st=format(end_time, "%Y-%m-%d_%H.%M.%s")
+  file_name <- paste("pearson_p_val","H3K27ac.peak_methylation", "shuffle",st, "rds", sep = ".")
   saveRDS(object = random_p_val,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
 
-  file_name <- paste("pearson_cor","methylation", "shuffle",st, "rds", sep = ".")
+  file_name <- paste("pearson_cor","H3K27ac.peak", "shuffle",st, "rds", sep = ".")
   saveRDS(object = random_pearson_cor,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
 }
 
 #############################################################################
 
-sim_files <- list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_p_val.*")
+sim_files <- list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "H3K27ac.peak.*")
 
-df <- readRDS(file = file.path(OUTPUT_FOLDER,
-                                     paste("4b"
-                                           ,"H3K27ac",
-                                           "with",
-                                           "pearson",
-                                           N_SAMPLES,
-                                           "samples",
-                                           ANNOTATION,
-                                           "rds",
-                                           sep = ".")))
+# df <- readRDS(file = file.path(OUTPUT_FOLDER,
+#                                      paste("4c"
+#                                            ,"H3K27ac.peak",
+#                                            "with",
+#                                            "pearson",
+#                                            N_SAMPLES,
+#                                            "samples",
+#                                            ANNOTATION,
+#                                            "rds",
+#                                            sep = ".")))
 
 sim_counts <- list()
 x_val <-list()
@@ -280,19 +280,10 @@ p <- ggplot(data = sim_results[sim_results$x > min_log_p,])+geom_point(position=
 
 
 ggsave(plot = p,
-       filename = file.path(OUTPUT_FOLDER,paste("sim vs real pearson_p_val_CpGs","png",sep = ".")),
-       width = 6, height = 4)
-
-
-
-
-
-
-
+       filename = file.path(OUTPUT_FOLDER,paste("sim vs real ChiP peak values  pearson_p_val_CpGs","png",sep = ".")),
+       width = 20, height = 16)
 
 ##################################################################
-
-
 
 # histogramm # sample coverage 
 library(tidyr)
