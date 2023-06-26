@@ -177,10 +177,10 @@ age_corr.test <- function(r) {
            method = "pearson")}
 
 for(rep in 1:n_repetitions){
-  
+  # rep <- 1
   print(rep)
   start_time <- Sys.time()
-  
+  # vertical permutation
   shuffeld_meth <- apply(X = meth, MARGIN = 2,FUN =  function(meth_sample){meth_sample[sample(1:length(meth_sample))]})
   
   cor_tests <- apply(shuffeld_meth , MARGIN = 1, FUN = age_corr.test)
@@ -201,10 +201,77 @@ for(rep in 1:n_repetitions){
   file_name <- paste("pearson_cor","methylation", "shuffle",st, "rds", sep = ".")
   saveRDS(object = random_pearson_cor,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
 }
+#############################################################################
+########################### horizonzal permuation ###########################
+########################### not parrarelized##############################
+n_repetitions <- 100
 
+# horizontal_random_age_corr.test <- function(r) {
+#   cor.test(x = sample(age),
+#            y =  as.numeric(r),
+#            method = "pearson")}
+
+for(rep in 1:n_repetitions){
+  # rep <- 1
+  print(rep)
+  start_time <- Sys.time()
+  # horizontal permutation
+  cor_tests <- apply(meth , MARGIN = 1, FUN = horizontal_random_age_corr.test)
+  
+  random_p_val <- sapply(cor_tests , FUN = function(r){r$p.val})
+  
+  random_pearson_cor <- sapply(cor_tests , FUN = function(r){r$statistic})
+  
+  end_time <- Sys.time()
+  st=format(end_time, "%Y-%m-%d_%H.%M")
+  print(end_time - start_time)
+  
+  file_name <- paste("pearson_p_val","methylation", "horizonal_shuffle",st, "rds", sep = ".")
+  saveRDS(object = random_p_val,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+  
+  file_name <- paste("pearson_cor","methylation", "horizonal_shuffle",st, "rds", sep = ".")
+  saveRDS(object = random_pearson_cor,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+  
+}
+
+
+############################## parallle R ######################### horizontal ###
+n_repetitions <- 100
+library("snow")
+#Create cluster
+clus <- makeCluster(parallel::detectCores() - 1)
+# Export it form base to workspace
+#clusterExport(clus, "horizontal_random_age_corr.test")
+clusterExport(clus,"age")
+#Apply the declared function
+for (rep in 1:n_repetitions) {
+  # rep <- 1
+  print(rep)
+  start_time <- Sys.time()
+  psr_cor_tests <-
+    parRapply(cl = clus, x = meth, fun = function(r) {
+      cor.test(x = sample(age),
+               y =  as.numeric(r),
+               method = "pearson")})
+  
+  random_p_val <- sapply(cor_tests , FUN = function(r){r$p.val})
+  
+  random_pearson_cor <- sapply(cor_tests , FUN = function(r){r$statistic})
+  
+  end_time <- Sys.time()
+  st = format(end_time, "%Y-%m-%d_%H.%M.%s")
+  print(end_time - start_time)
+  file_name <- paste("pearson_p_val","methylation", "horizonal_shuffle",st, "rds", sep = ".")
+  saveRDS(object = random_p_val,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+  
+  file_name <- paste("pearson_cor","methylation", "horizonal_shuffle",st, "rds", sep = ".")
+  saveRDS(object = random_pearson_cor,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+}
+stopCluster(clus)
 #############################################################################
 
-sim_files <- list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_p_val.*")
+sim_files <- list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_p_val.methylation.shuffle.*")
+horizontal_sim_files <-  list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_p_val.methylation.horizonal_shuffle.*")
 
 df <- readRDS(file = file.path(OUTPUT_FOLDER,
                                      paste("4b"
@@ -219,6 +286,8 @@ df <- readRDS(file = file.path(OUTPUT_FOLDER,
 
 sim_counts <- list()
 x_val <-list()
+horizontal_sim_counts <- list()
+horizontal_x_val <-list()
 
 
 #n <- 1 
@@ -227,34 +296,45 @@ for(n in 1:length(sim_files)){
 
 print(n)
 sim_pval <- readRDS( file.path(OUTPUT_FOLDER,"simulation",sim_files[n]))
+horizontal_sim_pval <- readRDS( file.path(OUTPUT_FOLDER,"simulation",horizontal_sim_files[n]))
 
 p <- ggplot(data = data.frame(sim_pval),mapping =  aes(x = -log(sim_pval)) )+
   geom_histogram(binwidth = 0.25)+ # beaks = seq(0,12,0.25)
   theme_minimal()+
   ggtitle("- log hist_sim_pearson_p_val_CpGs for a CpG")
 
+horizontal_p <- ggplot(data = data.frame(horizontal_sim_pval),mapping =  aes(x = -log(horizontal_sim_pval)) )+
+  geom_histogram(binwidth = 0.25)+ # beaks = seq(0,12,0.25)
+  theme_minimal()+
+  ggtitle("- log hist_sim_pearson_p_val_CpGs for a CpG")
+
 bp <- ggplot_build(p)
+horizontal_bp <- ggplot_build(horizontal_p)
+
 
 hist_data <- bp$data[[1]]
+horizontal_hist_data <- horizontal_bp$data[[1]]
+
 
 sim_counts[[n]] <- hist_data$count
 x_val[[n]] <- hist_data$x
-
+horizontal_sim_counts[[n]] <- horizontal_hist_data$count
+horizontal_x_val[[n]] <- horizontal_hist_data$x
 }
-
 ###########################################################################
 
 sim_results <- data.frame()
+horizontal_sim_results <- data.frame()
 
 for(n in 1:length(sim_counts)){
   
   
   temp <- data.frame(count = sim_counts[[n]], x = x_val[[n]] , name = paste("sim",n,sep = "_"))
+  horizontal_temp <- data.frame(count = horizontal_sim_counts[[n]], x = horizontal_x_val[[n]] , name = paste("horizontal_sim",n,sep = "_"))
   
   sim_results <- rbind(sim_results,temp)
+  horizontal_sim_results <- rbind(horizontal_sim_results,horizontal_temp)
 }
-
-
 
 
 ################################################################
@@ -273,21 +353,40 @@ hist_data <- bp$data[[1]]
 real_results <- hist_data[,c("x","count")]
 #############################################################
 
-min_log_p <- 5
+real_results$name <- "real data"
+horizontal_sim_results$name <- "horizontal (age) permuation"
+sim_results$name <- "vertical (methylation) permuation"
+all_results  <- rbind(real_results,horizontal_sim_results,sim_results)
+#all_results$x <- as.factor(all_results$x)
 
-p <- ggplot(data = sim_results[sim_results$x > min_log_p,])+geom_point(position="dodge",mapping = aes(x = x,y = count,group=name, colour=name))+
-  geom_point(data=real_results[real_results$x > min_log_p,],mapping = aes(x=x,y=count),size = 4,shape = 1)
+
+#############################################################
+
+#all_results  <- rbind(real_results,horizontal_sim_results,sim_results)
+
+
+min_log_p <- -log(0.01)
+
+tail_results <- all_results
+tail_results <- tail_results[tail_results$x >= min_log_p,]
+tail_results$x <- as.factor(tail_results$x)
+
+
+p <-
+  ggplot(data = tail_results,
+        mapping = aes(
+    x = x,
+    y = count,
+    group = name,
+    colour= name,
+    fill = name
+  ) )+geom_point(position = "jitter")
+
 
 
 ggsave(plot = p,
-       filename = file.path(OUTPUT_FOLDER,paste("sim vs real pearson_p_val_CpGs","png",sep = ".")),
-       width = 6, height = 4)
-
-
-
-
-
-
+       filename = file.path(OUTPUT_FOLDER,paste("sim horizontal and vertical vs real pearson_p_val_CpGs","png",sep = ".")),
+       width = 16, height = 8)
 
 
 ##################################################################
