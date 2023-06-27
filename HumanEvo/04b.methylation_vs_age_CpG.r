@@ -241,10 +241,9 @@ library("snow")
 #Create cluster
 clus <- makeCluster(parallel::detectCores() - 1)
 # Export it form base to workspace
-#clusterExport(clus, "horizontal_random_age_corr.test")
 clusterExport(clus,"age")
 #Apply the declared function
-for (rep in 1:n_repetitions) {
+for (rep in 1:n_repetitions) { # 
   # rep <- 1
   print(rep)
   start_time <- Sys.time()
@@ -254,9 +253,9 @@ for (rep in 1:n_repetitions) {
                y =  as.numeric(r),
                method = "pearson")})
   
-  random_p_val <- sapply(cor_tests , FUN = function(r){r$p.val})
+  random_p_val <- sapply(psr_cor_tests , FUN = function(r){r$p.val})
   
-  random_pearson_cor <- sapply(cor_tests , FUN = function(r){r$statistic})
+  random_pearson_cor <- sapply(psr_cor_tests , FUN = function(r){r$statistic})
   
   end_time <- Sys.time()
   st = format(end_time, "%Y-%m-%d_%H.%M.%s")
@@ -292,7 +291,7 @@ horizontal_x_val <-list()
 
 #n <- 1 
 
-for(n in 1:length(sim_files)){
+for(n in 1:length(horizontal_sim_files)){
 
 print(n)
 sim_pval <- readRDS( file.path(OUTPUT_FOLDER,"simulation",sim_files[n]))
