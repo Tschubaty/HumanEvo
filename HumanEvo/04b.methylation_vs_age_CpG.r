@@ -363,8 +363,8 @@ all_results  <- rbind(real_results,horizontal_sim_results,sim_results)
 
 #all_results  <- rbind(real_results,horizontal_sim_results,sim_results)
 
-
-min_log_p <- -log(0.01)
+uncorrected_alpha <- 0.01
+min_log_p <- -log(uncorrected_alpha)
 
 tail_results <- all_results
 tail_results <- tail_results[tail_results$x >= min_log_p,]
@@ -389,9 +389,107 @@ ggsave(plot = p,
 
 
 ##################################################################
+######################### correlation values #####################
+cor_files <- list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_cor.methylation.shuffle.*")
+horizontal_cor_files <-  list.files(path = file.path(OUTPUT_FOLDER,"simulation"),pattern = "pearson_cor.methylation.horizonal_shuffle.*")
 
 
+cor_sim_counts <- list()
+cor_x_val <-list()
+cor_horizontal_sim_counts <- list()
+cor_horizontal_x_val <-list()
+cor_sim_results <- data.frame()
+cor_horizontal_sim_results <- data.frame()
 
+max_sample <- length(horizontal_sim_files)
+
+for(n in 1:max_sample){
+  # n <- 1
+  print(n)
+  sim_cor_val <- readRDS( file.path(OUTPUT_FOLDER,"simulation",cor_files[n]))
+  horizontal_sim_cor_val<- readRDS( file.path(OUTPUT_FOLDER,"simulation",horizontal_cor_files[n]))
+  sim_pval <- readRDS( file.path(OUTPUT_FOLDER,"simulation",sim_files[n]))
+  horizontal_sim_pval <- readRDS( file.path(OUTPUT_FOLDER,"simulation",horizontal_sim_files[n]))
+
+  sim_dataframe <- data.frame(pval = sim_pval,cor = sim_cor_val)
+  horizontal_sim_dataframe <- data.frame(pval = horizontal_sim_pval,cor = horizontal_sim_cor_val)
+  
+  
+   p <- ggplot(data = sim_dataframe,mapping =  aes(x = cor) )+ # [sim_dataframe$pval <= uncorrected_alpha,]
+    geom_histogram(binwidth = 0.1)+ # beaks = seq(0,12,0.25)
+    theme_minimal()+
+    ggtitle("hist_corr_sim_pearson_CpGs for a CpG")
+  
+  horizontal_p <- ggplot(data = horizontal_sim_dataframe,mapping =  aes(x = cor) )+ # [horizontal_sim_dataframe$pval <= uncorrected_alpha,]
+    geom_histogram(binwidth = 0.1)+ # beaks = seq(0,12,0.25)
+    theme_minimal()+
+    ggtitle("hist_horizontal_corr_sim_pearson_CpGs for a CpG")
+
+  bp <- ggplot_build(p)
+  horizontal_bp <- ggplot_build(horizontal_p)
+  
+  
+  cor_hist_data <- bp$data[[1]]
+  cor_horizontal_hist_data <- horizontal_bp$data[[1]]
+  
+  
+  cor_sim_counts[[n]] <- cor_hist_data$count
+  cor_x_val[[n]] <- cor_hist_data$x
+  cor_horizontal_sim_counts[[n]] <- cor_horizontal_hist_data$count
+  cor_horizontal_x_val[[n]] <- cor_horizontal_hist_data$x
+  
+  # put as dataframe
+  temp <- data.frame(count = cor_sim_counts[[n]], x = cor_x_val[[n]] , name = paste("cor_sim",n,sep = "_"))
+  horizontal_temp <- data.frame(count = cor_horizontal_sim_counts[[n]], x = cor_horizontal_x_val[[n]] , name = paste("cor_horizontal_sim",n,sep = "_"))
+  
+  cor_sim_results <- rbind(cor_sim_results,temp)
+  cor_horizontal_sim_results <- rbind(cor_horizontal_sim_results,horizontal_temp)
+  
+}
+saveRDS(object = cor_sim_results,file = file.path(OUTPUT_FOLDER,"cor_sim_results.rds"))
+saveRDS(object = cor_horizontal_sim_results,file = file.path(OUTPUT_FOLDER,"cor_horizontal_sim_results"))
+
+
+ p <- ggplot(data = df,mapping =  aes(x = pearson_cor) )+ # [df$pearson_p_val <= uncorrected_alpha,]
+  geom_histogram(binwidth = 0.1)+ # beaks = seq(0,12,0.25)
+  theme_minimal()+
+  ggtitle("hist_corr_real_pearson_CpGs for a CpG")
+
+ 
+ bp <- ggplot_build(p)
+ 
+ hist_data <- bp$data[[1]]
+ 
+ cor_real_results <- hist_data[,c("x","count")]
+ #############################################################
+ 
+ cor_real_results$name <- "real data"
+ cor_horizontal_sim_results$name <- "horizontal (age) permuation"
+ cor_sim_results$name <- "vertical (methylation) permuation"
+ cor_all_results  <- rbind(cor_real_results,cor_horizontal_sim_results,cor_sim_results)
+ 
+ file_name <- paste("pearson_cor","CpG.methylation", "cor_all_results","rds", sep = ".")
+ saveRDS(object = cor_all_results,file = file.path(OUTPUT_FOLDER,file_name))
+
+ cor_tail_results <- cor_all_results[cor_all_results$x <= -3 | 3 <= cor_all_results$x,]
+ #cor_tail_results$x <- as.factor(cor_tail_results$x)
+ 
+ p <-
+   ggplot(data = cor_tail_results,
+          mapping = aes(
+            x = x,
+            y = count,
+            group = name,
+            colour= name,
+            fill = name
+          ) )+geom_point(position = "dodge")
+ 
+ 
+ ggsave(filename = file.path(OUTPUT_FOLDER,"cor_tail_results.png"),plot = p,width = 16,height = 10)
+ 
+ 
+ 
+#################################################################
 # histogramm # sample coverage 
 library(tidyr)
 
