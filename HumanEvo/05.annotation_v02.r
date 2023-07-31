@@ -83,6 +83,9 @@ CHR_NAMES <-
 
 meta <- readRDS(file = file.path("03.plots",paste("meta","rds",sep = ".")))
 
+age <- meta$age_mean_BP[order(meta$age_mean_BP)]
+
+
 df <- readRDS(file = file.path(INPUT_FOLDER,
                                      paste("H3K27ac",
                                            "with",
@@ -164,6 +167,64 @@ for(r in 1:nrow(df_sig)){
   df_sig$annotation_narrow_GH[r] <- most_narrow[2] 
   }
 }
+
+## get best example:
+
+best_examples <- table(df_sig$name)[order(table(df_sig$name),decreasing = TRUE)]
+
+df_sig[df_sig$name == names(best_examples)[8],]
+# RSL24D1 GH15J055194
+# TSC22D1 GH13J044522
+# TMEM14C GH06J010719
+# HNRNPH1 GH05J179619
+# HJURP   GH02J233851
+
+# CNRIP1
+# i <- 1
+best_genes <- data.frame(very_sig_p = best_examples[1:50])
+for(i in 1:50){
+  best_df <- df_sig[df_sig$name == names(best_examples)[i],]
+  #best_genes$name[i] <- best_df$name[1]
+  best_genes$annotation_narrow[i] <- best_df$annotation_narrow[1]
+  
+}
+write.table(x = best_genes$annotation_narrow,file = "best_50_examples.txt",row.names = FALSE,quote = FALSE)
+
+
+#
+for(b in 1:nrow(best_genes)){
+  # b <- 8
+  df_peak <- df[df$name == best_genes$very_sig_p.Var1[b],]
+  
+  dir.create(file.path("correlation plots", paste(best_genes$annotation_narrow[b])))
+  
+  p <- ggplot(data = df_peak,mapping = aes(x = start,y = pearson_cor))+
+    geom_point()+
+    xlab(best_genes$very_sig_p.Var1[b])+
+    theme_minimal()+
+    ggtitle(best_genes$annotation_narrow[b])
+  ggsave(filename = file.path("correlation plots",best_genes$annotation_narrow[b],paste(best_genes$annotation_narrow[b],"png",sep = ".")),plot = p,width = 4,height = 4)
+  
+  
+
+  for(r in 1:nrow(df_peak)){
+    meth <- df_peak[r,as.character(levels(meta$sample))]
+    df_plot <- data.frame(methylation = as.numeric(meth), age= age)
+    
+    scatter_plot <- ggplot(data = df_plot ,mapping =  aes(x = age, y = methylation)) + 
+      geom_point() +
+      ggtitle(paste(df_peak$chrom[r],df_peak$start[r]))+
+      geom_smooth(method="lm") #labs(x = "foot length (cm)", y = "height (cm)") 
+    ggsave(filename = file.path("correlation plots", best_genes$annotation_narrow[b],paste(df_peak$start[r],"cor",round(df_peak$pearson_cor[r],2),"png",sep = ".")),plot = scatter_plot)
+  }
+}
+
+
+
+
+
+
+
 
 nrow(df_sig)
 

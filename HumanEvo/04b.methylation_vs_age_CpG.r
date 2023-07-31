@@ -357,7 +357,7 @@ horizontal_sim_results$name <- "horizontal (age) permuation"
 sim_results$name <- "vertical (methylation) permuation"
 all_results  <- rbind(real_results,horizontal_sim_results,sim_results)
 #all_results$x <- as.factor(all_results$x)
-
+saveRDS(object = all_results,file = file.path(OUTPUT_FOLDER,"p_val_dataframe_all_results.rds"))
 
 #############################################################
 
@@ -371,21 +371,21 @@ tail_results <- tail_results[tail_results$x >= min_log_p,]
 tail_results$x <- as.factor(tail_results$x)
 
 
-p <-
-  ggplot(data = tail_results,
+p <-  ggplot(data = tail_results,
         mapping = aes(
     x = x,
     y = count,
     group = name,
     colour= name,
     fill = name
-  ) )+geom_point(position = "jitter")
+  ) )+geom_point(position = "jitter")+
+  theme_minimal()
 
 
 
 ggsave(plot = p,
        filename = file.path(OUTPUT_FOLDER,paste("sim horizontal and vertical vs real pearson_p_val_CpGs","png",sep = ".")),
-       width = 16, height = 8)
+       width = 16, height = 10)
 
 
 ##################################################################
@@ -448,8 +448,8 @@ for(n in 1:max_sample){
 }
 saveRDS(object = cor_sim_results,file = file.path(OUTPUT_FOLDER,"cor_sim_results.rds"))
 saveRDS(object = cor_horizontal_sim_results,file = file.path(OUTPUT_FOLDER,"cor_horizontal_sim_results"))
-
-
+#cor_sim_results <- readRDS(file.path(OUTPUT_FOLDER,"cor_sim_results.rds"))
+#cor_horizontal_sim_results <- readRDS(file.path(OUTPUT_FOLDER,"cor_horizontal_sim_results"))
  p <- ggplot(data = df,mapping =  aes(x = pearson_cor) )+ # [df$pearson_p_val <= uncorrected_alpha,]
   geom_histogram(binwidth = 0.1)+ # beaks = seq(0,12,0.25)
   theme_minimal()+
@@ -482,10 +482,10 @@ saveRDS(object = cor_horizontal_sim_results,file = file.path(OUTPUT_FOLDER,"cor_
             group = name,
             colour= name,
             fill = name
-          ) )+geom_point(position = "dodge")
+          ) )+geom_point(position = "dodge")+ theme_minimal()
  
  
- ggsave(filename = file.path(OUTPUT_FOLDER,"cor_tail_results.png"),plot = p,width = 16,height = 10)
+ ggsave(filename = file.path(OUTPUT_FOLDER,"cor_tail_results.png"),plot = p,width = 8,height = 5)
  
  
  
@@ -555,15 +555,26 @@ data_meth <- t(df[,as.character(levels(meta$sample))])
 pca_prcomp_res <- prcomp(data_meth)
 
 saveRDS(object = pca_prcomp_res,file =  file.path(OUTPUT_FOLDER,"pca_prcomp_res.rds"))
-
+#pca_prcomp_res <- readRDS(file = file.path(OUTPUT_FOLDER,"pca_prcomp_res.rds"))
 
 df_pca <- cbind(meta,pca_prcomp_res$x)
+
+eigs <- pca_prcomp_res$sdev^2
+
+pca_explained <- c()
+
+for(i in 1:length(eigs)){
+  pca_explained[i] <- eigs[i] / sum(eigs)
+}
+# pca1_explained <- eigs[1] / sum(eigs)
+# 
+# pca2_explained <- eigs[2] / sum(eigs)
 
 # sex
 p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = sex))+
   geom_point()+
   ggrepel::geom_text_repel()+
-  labs(subtitle="PCA & sex")
+  labs(subtitle="PCA & sex")+theme_minimal()
 
 ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_vs_sex.png"),width=8, height=6)
 
