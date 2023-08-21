@@ -81,8 +81,12 @@ CHR_NAMES <-
   )
 
 ################ CODE ###########################
+generate_meta <- FALSE
 
 
+
+if(generate_meta){
+  
 meta <- readRDS(file = file.path("03.plots",paste("meta","rds",sep = ".")))
 
 df <- readRDS(file.path(INPUT_FOLDER,paste("H3K27ac","only",N_SAMPLES,"samples","merged",ANNOTATION,"rds",sep = ".")))
@@ -136,7 +140,18 @@ saveRDS(object = df,file = file.path(OUTPUT_FOLDER,
                                            ANNOTATION,
                                            "rds",
                                            sep = ".")))
-
+}else{
+  df <- readRDS(file = file.path(OUTPUT_FOLDER,
+                                 paste("4b"
+                                       ,"H3K27ac",
+                                       "with",
+                                       "pearson",
+                                       N_SAMPLES,
+                                       "samples",
+                                       ANNOTATION,
+                                       "rds",
+                                       sep = ".")))
+}
 
 
 #############################################################################
