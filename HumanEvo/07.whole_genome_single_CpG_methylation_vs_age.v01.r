@@ -222,7 +222,135 @@ for (chr in CHR_NAMES) {
           file = file.path(OUTPUT_FOLDER, file_name))
 }
 stopCluster(clus)
+
 #############################################################################
+##################### all chr df ############################################
+# for each chromosome
+df_all <- data.frame()
+for (chr in CHR_NAMES) {
+  # chr <- CHR_NAMES[22]
+  
+  print(chr)
+  
+  file_name <-
+    paste(chr,
+          ANNOTATION,
+          N_SAMPLES,
+          "samples",
+          "p_val",
+          "delta_meth",
+          "rds",
+          sep = ".")
+  
+  df_chr <- readRDS(file = file.path(OUTPUT_FOLDER, file_name))
+  
+  df_all <- rbind(df_all, df_chr)
+}
+saveRDS(object = df_all, file = file.path(
+  OUTPUT_FOLDER,
+  paste(
+    "all",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "p_val",
+    "delta_meth",
+    "rds",
+    sep = "."
+  )
+))
+#############################################################################
+
+df_all <- readRDS(file = file.path(
+  OUTPUT_FOLDER,
+  paste(
+    "all",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "p_val",
+    "delta_meth",
+    "rds",
+    sep = "."
+  )))
+  
+############## NO_CHIP delta ###############################
+p <-
+  ggplot(data = df_all[df_all$name == "NO_CHIP", ], mapping = aes(x = delta_meth)) +
+  geom_histogram() + theme_bw()
+
+ggsave(filename = file.path(
+  OUTPUT_FOLDER,
+  "plots",
+  paste(
+    "NO_CHIP",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "delta_meth",
+    "png",
+    sep = "."
+  )),plot = p)
+
+p <-
+  ggplot(data = df_all[df_all$name != "NO_CHIP", ], mapping = aes(x = delta_meth)) +
+  geom_histogram() + theme_bw()
+
+ggsave(filename = file.path(
+  OUTPUT_FOLDER,
+  "plots",
+  paste(
+    "CHIP",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "delta_meth",
+    "png",
+    sep = "."
+  )),plot = p)
+
+# save H3K27ac
+saveRDS(object = df_all[df_all$name != "NO_CHIP", ],file = file.path(
+  OUTPUT_FOLDER,
+  paste(
+    "single_CpG",
+    "H3K27ac",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "p_val",
+    "delta_meth",
+    "rds",
+    sep = "."
+  )
+))
+##########################################################################################
+df_peak <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/H3K27ac.peak.mean.methylation.39.samples.merged.hg19.rds")
+
+p <-
+  ggplot(data = df_peak, mapping = aes(x = end - start)) + geom_histogram(breaks =
+                                                                            seq(from = 0, to = 3000, by = 10)) +
+  scale_x_continuous(
+    name = "peak length in bp",
+    breaks = seq(from = 0, to = 3000, by = 100),
+    guide = guide_axis(n.dodge = 2)
+  ) + theme_bw()
+
+# save H3K27ac plot of peak length
+ggsave(filename = file.path(
+  OUTPUT_FOLDER,
+  "plots",
+  paste(
+    "H3K27ac_peak_length ",
+    ANNOTATION,
+    N_SAMPLES,
+    "samples",
+    "delta_meth",
+    "png",
+    sep = "."
+  )),plot = p,width = 6,height = 6)
+
+
 #
 # ############################### Whole COLUMN VEtrical Permuation ############
 # ############################## parallle R #########################
@@ -805,21 +933,21 @@ stopCluster(clus)
 
 ######################## delta ##############################
 
-df$delta <-
-  as.numeric(apply(
-    X = ,
-    meth,
-    MARGIN = 1,
-    FUN = function(r) {
-      max(r) - min(r)
-    }
-  ))
-nrow(df)
-sum(df$pearson_p_val < 0.01, na.rm = TRUE)
-sum(df$delta > 0.25, na.rm = TRUE)
-sum(df$pearson_p_val < 0.01 & df$delta > 0.25, na.rm = TRUE)
-
-ggplot(data = df, mapping = aes(x = delta)) + geom_histogram(binwidth = 0.025) +
-  geom_vline(xintercept = 0.25, color = "red")
-hist(df$delta)
-hist(-log(df$pearson_p_val))
+# df$delta <-
+#   as.numeric(apply(
+#     X = ,
+#     meth,
+#     MARGIN = 1,
+#     FUN = function(r) {
+#       max(r) - min(r)
+#     }
+#   ))
+# nrow(df)
+# sum(df$pearson_p_val < 0.01, na.rm = TRUE)
+# sum(df$delta > 0.25, na.rm = TRUE)
+# sum(df$pearson_p_val < 0.01 & df$delta > 0.25, na.rm = TRUE)
+# 
+# ggplot(data = df, mapping = aes(x = delta)) + geom_histogram(binwidth = 0.025) +
+#   geom_vline(xintercept = 0.25, color = "red")
+# hist(df$delta)
+# hist(-log(df$pearson_p_val))
