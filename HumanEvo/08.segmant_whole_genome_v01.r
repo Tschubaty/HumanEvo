@@ -14,7 +14,7 @@
 #################################################################
 #Clear R working environment
 rm(list = ls())
-cluster <- FALSE
+cluster <- TRUE
 if (cluster) {
   this.dir <- "/ems/elsc-labs/meshorer-e/daniel.batyrev/"
   picuture_file_extension <- "pdf"
@@ -82,7 +82,7 @@ CHR_NAMES <-
 
 ##################################################
 
-window_width <- 300
+window_width <- 400
 min_delta <- 0.25
 offset = 0
 
