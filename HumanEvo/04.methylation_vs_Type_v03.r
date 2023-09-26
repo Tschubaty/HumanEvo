@@ -258,70 +258,67 @@ ggplot(data = df_single,mapping = aes(x = type,y = meth, color = type))+
 
 # test function for horizontal column permuation 
 meth_vs_type_test2 <- function(df_row, typisation){
-  df_analyis <- data.frame()
-  for(s in unique(real_sample_typisation$type)){
-    meth <- as.numeric(df_row[real_sample_typisation$sample[real_sample_typisation$type == s]])
+  typisation$meth <- NA
+  for(s in unique(typisation$type)){
+    meth <- as.numeric(df_row[typisation$sample[typisation$type == s]])
     # test prerequisite if at least 5 samples 
     if(sum(!is.na(meth)) < 5){
       return(NA)
-    } 
-    temp <- data.frame(meth = meth ,type = s)
-    df_analyis <- rbind(df_analyis,temp)
+    }
+    typisation$meth[typisation$type == s] <- meth
   }
-  kru_test <- kruskal.test(meth ~ type, data = df_analyis)
+  
+  kru_test <- kruskal.test(meth ~ type, data = typisation)
   return(kru_test)
 }
 
+te <- meth_vs_type_test2(df_CpG[1000,],real_sample_typisation)
 
-
-
-
-
-
-
-
-
-
-
-n_repetitions <- 100
+n_repetitions <- 2
 library("snow")
 #Create cluster
-clus <- makeCluster(parallel::detectCores() - 1)
+clust <- makeCluster(parallel::detectCores() - 1)
 # Export it form base to workspace
-clusterExport(clus,"sample_types")
+clusterExport(clust,"meth_vs_type_test2")
+clusterExport(clust,"sample_types")
 #Apply the declared function
 for (rep in 1:n_repetitions) { # 
   # rep <- 1
   print(rep)
   start_time <- Sys.time()
   
-  permuted_meth <- df_CpG[,unlist(sample_types,use.names = FALSE)]
+  permuted_sample_typisation <- real_sample_typisation
+  permuted_sample_typisation$sample <- sample(permuted_sample_typisation$sample)
+  
+  clusterExport(clust,"permuted_sample_typisation")
   
   
   
-  test_chr <- parApply(cl = clust, X = df_all_chrom,MARGIN = 1,FUN = meth_vs_type_test)
-  delta <- parApply(cl = clust, X = df_all_chrom,MARGIN = 1,FUN = delta_mean_type)
+  simulated_test <- parApply(cl = clust, X = df_CpG,MARGIN = 1,FUN = function(r){return(meth_vs_type_test2(r,permuted_sample_typisation))})
+  delta <- parApply(cl = clust, X = df_CpG,MARGIN = 1,FUN = delta_mean_type)
   
-  psr_cor_tests <-
-    parRapply(cl = clus, x = meth, fun = function(r) {
-      cor.test(x = sample(age),
-               y =  as.numeric(r),
-               method = "pearson")})
+  random_p_val <- sapply(simulated_test , FUN = function(r){r$p.val})
   
-  random_p_val <- sapply(psr_cor_tests , FUN = function(r){r$p.val})
-  
-  random_pearson_cor <- sapply(psr_cor_tests , FUN = function(r){r$statistic})
+  random_statistic <- sapply(simulated_test , FUN = function(r){r$statistic})
   
   end_time <- Sys.time()
   st = format(end_time, "%Y-%m-%d_%H.%M.%s")
   print(end_time - start_time)
-  file_name <- paste("pearson_p_val","methylation", "horizonal_shuffle",st, "rds", sep = ".")
+  
+  
+  saveRDS(object = permuted_sample_typisation)
+  
+  file_name <- paste("Kruskal_Wallis_chi_squared_p_val","type", "label_shuffle",st, "rds", sep = ".")
   saveRDS(object = random_p_val,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
   
-  file_name <- paste("pearson_cor","methylation", "horizonal_shuffle",st, "rds", sep = ".")
-  saveRDS(object = random_pearson_cor,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+  file_name <- paste("Kruskal_Wallis_chi_squared_statistic","type", "label_shuffle",st, "rds", sep = ".")
+  saveRDS(object = random_statistic,file = file.path(OUTPUT_FOLDER,"simulation",file_name))
+  
+  file_name <- paste("permuted_sample_typisation","type", "label_shuffle",st, "rds", sep = ".")
+  saveRDS(object = permuted_sample_typisation,file = file_name)
+  
 }
-stopCluster(clus)
+stopCluster(clust)
 #############################################################################
 
 
