@@ -548,12 +548,13 @@ for (n in 1:length(sim_counts)) {
   temp <-
     data.frame(count = sim_counts[[n]],
                x = x_val[[n]] ,
-               name = paste("sim", n, sep = "_"))
+               name = paste("sim", n, sep = "_"),
+               file = sim_files[n])
 
   sim_results <- rbind(sim_results, temp)
 }
 
-
+#sim_files[n]
 ################################################################
 
 #ggplot(data = sim_results,mapping = aes(x = x,y = count,group=name, colour=name))+geom_point(position="dodge")
@@ -571,8 +572,11 @@ hist_data <- bp$data[[1]]
 real_results <- hist_data[, c("x", "count")]
 #############################################################
 
-real_results$name <- "real data"
-sim_results$name <- "label permuation"
+real_results$label <- "real data"
+real_results$file <- "realData"
+real_results$name <- "original"
+
+sim_results$label <- "label permuation"
 all_results  <-
   rbind(real_results, sim_results)
 #all_results$x <- as.factor(all_results$x)
@@ -624,4 +628,58 @@ ggsave(
 ##################################################################
 
 saveRDS(object = df_CpG,file = file.path(OUTPUT_FOLDER,"peak_CpG_with_kruskal_valis_p_val.rds"))
+
+############################################################## compute ROC ############################
+
+all_results
+
+mean_simulation_count <- aggregate(x = all_results[all_results$label != "real data","count"], list(all_results$x[all_results$label != "real data"]), mean)
+
+ggplot(data = mean_simulation_count,mapping = aes(x = Group.1,y = x))+geom_line()
+
+mean_simulation_count_CDF <- data.frame("minus.log.p" = mean_simulation_count$Group.1, empiric_CDF = NA) 
+for(r in 1:nrow(mean_simulation_count)){
+  
+  mean_simulation_count_CDF$empiric_mean_sim_CDF[r] <-  sum(mean_simulation_count$x[mean_simulation_count$Group.1 >= mean_simulation_count_CDF$minus.log.p[r]])
+  
+}
+
+real_data_count_CDF <- data.frame("minus.log.p" = real_results$x, empiric_CDF = NA) 
+for(r in 1:nrow(real_results)){
+  
+  real_data_count_CDF$empiric_CDF[r] <-  sum(real_results$count[real_results$x >= real_data_count_CDF$minus.log.p[r]])
+  
+}
+
+
+
+df_ROC <-
+  data.frame(
+    minus.log.p = real_data_count_CDF$minus.log.p,
+    false_positive_rate =   mean_simulation_count_CDF$empiric_mean_sim_CDF[1:nrow(real_data_count_CDF)] / real_data_count_CDF$empiric_CDF,
+    real_to_false_rate = real_data_count_CDF$empiric_CDF / mean_simulation_count_CDF$empiric_mean_sim_CDF[1:nrow(real_data_count_CDF)]
+  )
+
+
+p <- ggplot(data = df_ROC,
+       mapping = aes(x = minus.log.p, y = real_to_false_rate)) + geom_line() +
+  geom_point() + geom_point(data = df_ROC[which.max(df_ROC$real_to_false_rate), ], color =
+                              "red")+theme_minimal()+ggtitle("optimal p value for maximum true positive rate")
+
+ggsave(
+  plot = p,
+  filename = file.path(
+    OUTPUT_FOLDER,
+    paste(
+      "true positive to false positive ratio depending on P val cutoff value",
+      "png",
+      sep = "."
+    )
+  ),
+  width = 16,
+  height = 10
+)
+
+##############################################################
+
 
