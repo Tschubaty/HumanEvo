@@ -174,7 +174,6 @@ dim(remove_CpG_dup)
 # Forming the matrix for the first four columns 
 meth_matrix <- as.matrix(remove_CpG_dup)
 
-
 # Calculate tSNE using Rtsne(0 function) 
 tsne_out <- Rtsne( X = meth_matrix,
                    perplexity = floor((nrow(meth_matrix) - 1) / 3),
@@ -185,22 +184,28 @@ meta37$tsne_1 <- tsne_out$Y[,1]
 meta37$tsne_2 <- tsne_out$Y[,2]
 
 # Plotting the plot using ggplot() function
-ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = sex)) + # 
+p_tsne_sex <- ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = sex)) + # 
   geom_point()+  
   ggrepel::geom_text_repel()+
   labs(subtitle="tsne")+
   theme_minimal()
 
+ggsave(plot = p_tsne_sex,filename = file.path(OUTPUT_FOLDER,"p_tsne_sex.png"),width=10, height=6)
+
 # Plotting the plot using ggplot() function
-ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = Country)) + # 
+p_tsne_Country <- ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = Country)) + # 
   geom_point()+  
   ggrepel::geom_text_repel()+
   labs(subtitle="tsne")+
   theme_minimal()
 
+ggsave(plot = p_tsne_Country,filename = file.path(OUTPUT_FOLDER,"p_tsne_Country.png"),width=10, height=6)
+
 # Plotting the plot using ggplot() function
-ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = Type)) + # 
+p_tsne_food_Type <- ggplot2::ggplot(data = meta37,mapping = aes(x = tsne_1, y = tsne_2,label=sample,color = Type)) + # 
   geom_point()+  
   ggrepel::geom_text_repel()+
   labs(subtitle="tsne")+
   theme_minimal()
+
+ggsave(plot = p_tsne_food_Type,filename = file.path(OUTPUT_FOLDER,"p_tsne_food_Type.png"),width=10, height=6)
