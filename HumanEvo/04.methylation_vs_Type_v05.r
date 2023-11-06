@@ -216,13 +216,13 @@ parallel_testing_kruskall_valis <- function(df, typisation) {
 }
 
 ############################## produce sim ###################################
-real_sample_typisation <- parallel_testing_kruskall_valis(df_CpG, real_sample_typisation) 
+df_type_results <- parallel_testing_kruskall_valis(df_CpG, real_sample_typisation) 
 
-df_CpG_results <- cbind(df_CpG,real_sample_typisation)
+df_CpG_results <- cbind(df_CpG,df_type_results)
 saveRDS(object = df_CpG_results,file = file.path(OUTPUT_FOLDER,"37_completecase_peak_CpG_hg19_cut_peak_annotation_with_kruskall_valis.rds"))
 
 if (create_permutations) {
-  n_repetitions <- 100
+  n_repetitions <- 2
   library("snow")
   for (rep in 1:n_repetitions) {
     #
