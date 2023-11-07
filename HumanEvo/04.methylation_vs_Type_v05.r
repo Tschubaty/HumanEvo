@@ -358,9 +358,13 @@ end_time <- Sys.time()
 print(end_time - start_time)
 
 
-
-ggplot(data = real_peak_results,mapping = aes(x = n_complete,y = -log(best_p_val)))+
-  geom_point()
+lmp <- function (modelobject) {
+  if (class(modelobject) != "lm") stop("Not an object of class 'lm' ")
+  f <- summary(modelobject)$fstatistic
+  p <- pf(f[1],f[2],f[3],lower.tail=F)
+  attributes(p) <- NULL
+  return(p)
+}
 
 
 
@@ -381,7 +385,7 @@ linreg_summery <- summary(linreg)
 
 png(file=file.path(OUTPUT_FOLDER,"plot",paste("min_delta",min_delta,"real_data_length_vs_pval_linear.png")),
     width=600, height=350)
-plot(y~a,main=paste( "Linear","r-squared:",linreg_summery$r.squared),
+plot(y~a,main=paste( "Linear","r-squared:",linreg_summery$r.squared,"p-val",lmp(linreg)),
      xlab="peak segemnt length in bp", ylab="best -log p val")
 abline(linreg, col="blue")
 dev.off()
@@ -396,65 +400,101 @@ lines(a[order(a)], hat[order(hat)], col="red")
 dev.off()
 
 
+ggplot(data = real_peak_results,mapping = aes(x = n_complete,y = -log(best_p_val)))+
+  geom_point()
 
-
-
-
-
-
-
-
-## @knitr create_data
-y <- seq(from=1, to=10, length.out=100)
-a <- y^3 +y^2  + rnorm(100,mean=0, sd=30)
+a <- real_peak_results$n_complete[!is.na(real_peak_results$best_p_val)& real_peak_results$length > 300]
 data <- data.frame(a=a, y=y)
 plot(y=y, x=a)
 
-## @knitr linreg
-linreg <- lm(y~a)
-summary(linreg)
-
 loess <- loess(y~a)
-summary(loess)
+loess_summery <- summary(loess)
+linreg <- lm(y~a)
+linreg_summery <- summary(linreg)
 
-scatter.smooth(data)
+
+png(file=file.path(OUTPUT_FOLDER,"plot",paste("min_delta",min_delta,"real_data_#_CpG_data_points_vs_pval_linear.png")),
+    width=600, height=350)
+plot(y~a,main=paste( "Linear","r-squared:",linreg_summery$r.squared,"p-val",lmp(linreg)),
+     xlab="# CpG_data_points", ylab="best -log p val")
 abline(linreg, col="blue")
+dev.off()
 
-## @knitr loess_fit
+
+png(file=file.path(OUTPUT_FOLDER,"plot",paste("min_delta",min_delta,"real_data_#_CpG_data_points_vs_pval_LOESS.png")),
+    width=600, height=350)
 hat <- predict(loess)
-plot(y~a)
+plot(y~a,main=paste( "LOESS","r-squared:",cor(y, hat)^2),
+     xlab="#_CpG_data_points", ylab="best -log p val")
 lines(a[order(a)], hat[order(hat)], col="red")
-(r_sq_loess <- cor(y, hat)^2)
-
-## @knitr fit_loess
-par(mfrow=c(2,2))
-plot(linreg$fitted, linreg$residuals, main="classical linear regression")
-plot(loess$fitted, loess$residuals, main="LOESS")
-# normal probablility plot
-qqnorm(linreg$residuals, ylim=c(-2,2)) 
-qqline(linreg$residuals)
-qqnorm(loess$residuals, ylim=c(-2,2)) 
-qqline(loess$residuals)
-
-## @knitr predict
-predict <- data.frame(a=c(10,400,900))
-scatter.smooth(data)
-abline(linreg, col="blue")
-
-predict$linreg <- predict(linreg, predict)
-predict$loess <- predict(loess, predict)
-
-predict
-
-points(x=predict$a, y=predict(linreg, predict), col="blue", pch=18, cex=2)
-points(x=predict$a, y=predict(loess, predict), col="red", pch=18, cex=2)
+dev.off()
 
 
 
 
+##################################################################################s
+
+############ all simmulations collected
+RESOLUTION_WIDTH <- 0.25 
 
 
+df_simulation.stats <- data.frame(file_name = list.files(path = file.path(OUTPUT_FOLDER, "simulation"),
+                                                         pattern = "Kruskal_Wallis.type.label_shuffle.*"),hemming.distance_permuation = NA,permuation_order = NA)
 
+string_permuation_order <- gsub(pattern = "Kruskal_Wallis.type.label_shuffle.|.rds",replacement = "",x = df_simulation.stats$file_name)
+df_simulation.stats$permuation_order <- string_permuation_order
+
+permuation_orders <- lapply(X = string_permuation_order,FUN = function(string){
+  numbers <- as.numeric(unlist(strsplit(x = string, split = "\\.")))
+  return(as.vector(numbers ))
+})
+
+df_simulation.stats$hemming.distance_permuation <- sapply(permuation_orders,FUN =  function(permutation_order){
+  type_permutation_order <- as.numeric(factor(real_sample_typisation$type[permutation_order]))
+  type_real_order <- as.numeric(factor(real_sample_typisation$type))
+  return(sum(type_real_order != type_permutation_order))
+})
+
+# print("spaical case of sim number 8 is very significant")
+# as.numeric(factor(real_sample_typisation$type[permuation_orders[[8]]]))
+# as.numeric(factor(real_sample_typisation$type))
+# significant_sample_typisation <- real_sample_typisation
+# significant_sample_typisation$group <- as.numeric(factor(real_sample_typisation$type[permuation_orders[[8]]]))
+# meta$significant_sample_typisation 
+# 
+# saveRDS(object = significant_sample_typisation$group,file = file.path(OUTPUT_FOLDER,"significant_sample_typisation.rds"))
+
+
+for (n in 1:nrow(df_simulation.stats)) {
+  start_time <- Sys.time()
+  print(n)
+  sim <-
+    readRDS(file.path(
+      OUTPUT_FOLDER,
+      "simulation",
+      df_simulation.stats$file_name[n]
+    ))
+  sim_peak_results <-
+    find_best_CpG_for_peak(
+      peak_coordinates = peak_coordinates,
+      KW.test.stat = sim,
+      min_delta = min_delta
+    )
+  saveRDS(object = sim_peak_results,
+          file = file.path(OUTPUT_FOLDER,"simulation",
+            paste(
+              "sim_peak_results",
+              ANNOTATION,
+              min_delta,
+              "mean_delta",
+              df_simulation.stats$permuation_order[n],
+              "rds",
+              sep = "."
+            )
+          ))
+  end_time <- Sys.time()
+  print(end_time - start_time)
+}
 # start_time <- Sys.time()
 # test3 <- apply(
 #   peak_coordinates,
