@@ -42,8 +42,6 @@ detachAllPackages <- function() {
 }
 detachAllPackages()
 # #################################### Libs ########################################
-# library(foreach)
-# library(doParallel)
 library(ggplot2)
 #library(Rtsne)
 #library(ggrepel)
@@ -56,7 +54,7 @@ dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
 #INPUT_FOLDER <-
 N_SAMPLES <- 37
 ANNOTATION <- "hg19"
-create_permutations <- TRUE
+create_permutations <- FALSE
 
 CHR_NAMES <-
   c(
@@ -216,13 +214,16 @@ parallel_testing_kruskall_valis <- function(df, typisation) {
 }
 
 ############################## produce sim ###################################
-df_type_results <- parallel_testing_kruskall_valis(df_CpG, real_sample_typisation) 
+# df_type_real_results <- parallel_testing_kruskall_valis(df_CpG, real_sample_typisation) 
+# saveRDS(object = df_type_real_results,file = file.path(OUTPUT_FOLDER,"real","Kruskal_Wallis.type.real.rds"))
+# saveRDS(object = real_sample_typisation,file = file.path(OUTPUT_FOLDER,"real","real_sample_typisation.rds"))
+df_type_real_results <- readRDS(file = file.path(OUTPUT_FOLDER,"real","Kruskal_Wallis.type.real.rds"))
 
-df_CpG_results <- cbind(df_CpG,df_type_results)
-saveRDS(object = df_CpG_results,file = file.path(OUTPUT_FOLDER,"37_completecase_peak_CpG_hg19_cut_peak_annotation_with_kruskall_valis.rds"))
+# df_CpG_results <- cbind(df_CpG,df_type_real_results)
+# saveRDS(object = df_CpG_results,file = file.path(OUTPUT_FOLDER,"37_completecase_peak_CpG_hg19_cut_peak_annotation_with_kruskall_valis.rds"))
 
 if (create_permutations) {
-  n_repetitions <- 2
+  n_repetitions <- 100
   library("snow")
   for (rep in 1:n_repetitions) {
     #
@@ -265,6 +266,273 @@ if (create_permutations) {
 }
 #############################################################################
 
+peak_coordinates <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/ChipSegmentCut/all.cut.peak_coordinates.hg19.37.n_samples.rds")
+
+bed6_colnames <- c("chrom" ,"start" , "end", "name", "score" ,"strand")
+df_bed6 <- df_CpG[,bed6_colnames]
+
+min_delta <- 0.08
+# 
+# 
+# start_time <- Sys.time()
+# 
+# df_best_CpG <- as.data.frame(matrix(nrow = nrow(peak_coordinates),ncol = ncol(df_x)+1))
+# 
+# for(r in 1:nrow(peak_coordinates)){
+#   # r <- 1
+#   peak <- peak_coordinates[r,]
+#   if(peak$n_complete > 0){
+#     indices <-  peak$chr == df_bed6$chrom & peak$start <= df_bed6$start & df_bed6$end <= peak$end 
+#     indices_min_delta <- indices & !is.na(df_x$type_mean_delta) & df_x$type_mean_delta >= min_delta
+#     n_min_delta <- sum(indices_min_delta)
+#     if(sum(indices_min_delta) > 0){
+#     best_CpG_position <- df_bed6$start[indices_min_delta][which.min(df_x$p_val[indices_min_delta])]
+#     best_CpG_stat <- df_x[indices_min_delta,][which.min(df_x$p_val[indices_min_delta]),]
+#     df_best_CpG[r,] <- as.numeric(c(best_CpG_position,best_CpG_stat))
+#     }else{
+#       df_best_CpG[r,] <-c(NA,NA,NA,NA)
+#     }
+#   }else{
+#     df_best_CpG[r,] <-c(NA,NA,NA,NA)
+#   }
+#   
+# }
+# 
+# colnames(df_best_CpG) <- c("best_position","best_p_val", "best_statistic","best_type_mean_delta")
+# 
+# peak_results <- cbind(peak_coordinates,df_best_CpG)
+# end_time <- Sys.time()
+# print(end_time - start_time)
+
+find_best_CpG_for_peak <-
+  function(peak_coordinates,
+           KW.test.stat,
+           min_delta) {
+    df_best_CpG <-
+      as.data.frame(matrix(
+        nrow = nrow(peak_coordinates),
+        ncol = ncol(KW.test.stat) + 1
+      ))
+    
+    for (r in 1:nrow(peak_coordinates)) {
+      # r <- 1
+      peak <- peak_coordinates[r,]
+      if (peak$n_complete > 0) {
+        indices <-
+          peak$chr == df_bed6$chrom &
+          peak$start <= df_bed6$start & df_bed6$end <= peak$end
+        indices_min_delta <-
+          indices &
+          !is.na(KW.test.stat$type_mean_delta) &
+          KW.test.stat$type_mean_delta >= min_delta
+        n_min_delta <- sum(indices_min_delta)
+        if (sum(indices_min_delta) > 0) {
+          best_CpG_position <-
+            df_bed6$start[indices_min_delta][which.min(KW.test.stat$p_val[indices_min_delta])]
+          best_CpG_stat <-
+            KW.test.stat[indices_min_delta,][which.min(KW.test.stat$p_val[indices_min_delta]),]
+          df_best_CpG[r,] <-
+            as.numeric(c(best_CpG_position, best_CpG_stat))
+        } else{
+          df_best_CpG[r,] <- c(NA, NA, NA, NA)
+        }
+      } else{
+        df_best_CpG[r,] <- c(NA, NA, NA, NA)
+      }
+      
+    }
+    
+    colnames(df_best_CpG) <-
+      c("best_position",
+        "best_p_val",
+        "best_statistic",
+        "best_type_mean_delta")
+    return(cbind(peak_coordinates, df_best_CpG))
+  }
+
+start_time <- Sys.time()
+
+real_peak_results <- find_best_CpG_for_peak(peak_coordinates = peak_coordinates,KW.test.stat = df_type_real_results,min_delta = min_delta)
+saveRDS(object = real_peak_results,file = file.path(OUTPUT_FOLDER,paste("real_peak_results",ANNOTATION,N_SAMPLES,"min_type_delta",min_delta,"rds",sep = ".")))
+end_time <- Sys.time()
+print(end_time - start_time)
+
+
+
+ggplot(data = real_peak_results,mapping = aes(x = n_complete,y = -log(best_p_val)))+
+  geom_point()
+
+
+
+ggplot(data = real_peak_results,mapping = aes(x = length,y = -log(best_p_val)))+
+  geom_point()
+
+
+y <- -log(real_peak_results$best_p_val[!is.na(real_peak_results$best_p_val) & real_peak_results$length > 300])
+a <- real_peak_results$length[!is.na(real_peak_results$best_p_val)& real_peak_results$length > 300]
+data <- data.frame(a=a, y=y)
+plot(y=y, x=a)
+
+loess <- loess(y~a)
+loess_summery <- summary(loess)
+linreg <- lm(y~a)
+linreg_summery <- summary(linreg)
+
+
+png(file=file.path(OUTPUT_FOLDER,"plot",paste("min_delta",min_delta,"real_data_length_vs_pval_linear.png")),
+    width=600, height=350)
+plot(y~a,main=paste( "Linear","r-squared:",linreg_summery$r.squared),
+     xlab="peak segemnt length in bp", ylab="best -log p val")
+abline(linreg, col="blue")
+dev.off()
+
+
+png(file=file.path(OUTPUT_FOLDER,"plot",paste("min_delta",min_delta,"real_data_length_vs_pval_LOESS.png")),
+    width=600, height=350)
+hat <- predict(loess)
+plot(y~a,main=paste( "LOESS","r-squared:",cor(y, hat)^2),
+     xlab="peak segemnt length in bp", ylab="best -log p val")
+lines(a[order(a)], hat[order(hat)], col="red")
+dev.off()
+
+
+
+
+
+
+
+
+
+
+## @knitr create_data
+y <- seq(from=1, to=10, length.out=100)
+a <- y^3 +y^2  + rnorm(100,mean=0, sd=30)
+data <- data.frame(a=a, y=y)
+plot(y=y, x=a)
+
+## @knitr linreg
+linreg <- lm(y~a)
+summary(linreg)
+
+loess <- loess(y~a)
+summary(loess)
+
+scatter.smooth(data)
+abline(linreg, col="blue")
+
+## @knitr loess_fit
+hat <- predict(loess)
+plot(y~a)
+lines(a[order(a)], hat[order(hat)], col="red")
+(r_sq_loess <- cor(y, hat)^2)
+
+## @knitr fit_loess
+par(mfrow=c(2,2))
+plot(linreg$fitted, linreg$residuals, main="classical linear regression")
+plot(loess$fitted, loess$residuals, main="LOESS")
+# normal probablility plot
+qqnorm(linreg$residuals, ylim=c(-2,2)) 
+qqline(linreg$residuals)
+qqnorm(loess$residuals, ylim=c(-2,2)) 
+qqline(loess$residuals)
+
+## @knitr predict
+predict <- data.frame(a=c(10,400,900))
+scatter.smooth(data)
+abline(linreg, col="blue")
+
+predict$linreg <- predict(linreg, predict)
+predict$loess <- predict(loess, predict)
+
+predict
+
+points(x=predict$a, y=predict(linreg, predict), col="blue", pch=18, cex=2)
+points(x=predict$a, y=predict(loess, predict), col="red", pch=18, cex=2)
+
+
+
+
+
+
+
+# start_time <- Sys.time()
+# test3 <- apply(
+#   peak_coordinates,
+#   1,
+#   FUN = function(peak) {
+#     #print(peak)
+#     if (as.numeric(peak["n_complete"]) > 0) {
+#       indices <-
+#         peak["chr"] == df_bed6$chrom &
+#         as.numeric(peak["start"]) <= df_bed6$start &
+#         df_bed6$end <= as.numeric(peak["end"])
+#       indices_min_delta <-
+#         indices &
+#         !is.na(df_x$type_mean_delta) &
+#         df_x$type_mean_delta >= min_delta
+#       n_min_delta <- sum(indices_min_delta)
+#       if (n_min_delta > 0) {
+#         best_CpG_position <-
+#           df_bed6$start[indices_min_delta][which.min(df_x$p_val[indices_min_delta])]
+#         best_CpG_stat <-
+#           df_x[indices_min_delta,][which.min(df_x$p_val[indices_min_delta]),]
+#       } else{
+#         return(c(NA, NA, NA, NA))
+#       }
+#       return(as.numeric(c(best_CpG_position, best_CpG_stat)))
+#     } else{
+#       return(c(NA, NA, NA, NA))
+#     }
+#     
+#   }
+# )
+# end_time <- Sys.time()
+# print(end_time - start_time)
+# 
+# 
+# library(foreach)
+# library(doParallel)
+# find_best_CpG_for_peak <- function(peak_coordinates, min_delta) {
+#   # for(r in 1:nrow(peak_coordinates)){
+#   # r <- 1
+#   numCores <- detectCores() - 1
+#   registerDoParallel(numCores)
+#   results <- foreach(peak = peak_coordinates,
+#                      .combine = rbind) %dopar% {
+#                        if (peak$n_complete > 0) {
+#                          #print(peak)
+#                          if (as.numeric(peak["n_complete"]) > 0) {
+#                            indices <-
+#                              peak["chr"] == df_bed6$chrom &
+#                              as.numeric(peak["start"]) <= df_bed6$start & df_bed6$end <= as.numeric(peak["end"])
+#                            indices_min_delta <-
+#                              indices &
+#                              !is.na(df_x$type_mean_delta) & df_x$type_mean_delta >= min_delta
+#                            n_min_delta <- sum(indices_min_delta)
+#                            best_CpG_position <-
+#                              df_bed6$start[indices_min_delta][which.min(df_x$p_val[indices_min_delta])]
+#                            best_CpG_stat <-
+#                              df_x[indices_min_delta, ][which.min(df_x$p_val[indices_min_delta]), ]
+#                            return(as.numeric(c(best_CpG_position, best_CpG_stat)))
+#                          } else{
+#                            return(c(NA, 1, NA, NA))
+#                          }
+#                          
+#                        } else{
+#                          return(c(NA, NA, NA, NA))
+#                        }
+#                        
+#                      }
+#   stopImplicitCluster()
+#   gc()
+#   return(results)
+# }
+# 
+# 
+# start_time <- Sys.time()
+# test2 <- find_best_CpG_for_peak(peak_coordinates, min_delta) 
+# end_time <- Sys.time()
+# print(end_time - start_time)
 
 
 
