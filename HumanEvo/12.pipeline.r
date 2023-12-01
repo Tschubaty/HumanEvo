@@ -85,12 +85,15 @@ CHR_NAMES <-
     "chr21",
     "chr22"
   )
+pearson_test_colnames <- c("pearson.p_val","pearson.statistic", "pearson.delta")
+KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
 
 # set running parameters -------------------------------------------------------
 create_true_stat <- FALSE
 create_permutations_horizonal_columns <- FALSE
 summerize_horizonal_columns_permutations <- FALSE
-
+summerize_real_values <- TRUE
+OTHER <- FALSE
 # load Data ---------------------------------------------------------------
 
 df_peak_CpG <-
@@ -384,129 +387,6 @@ get_n_significant  <-
 #' @param min_deltas define minimum delta to be reached to be counted
 #' @returns dataframe with number of signifincat pvals for each combination
 #' in each file
-summerize_permutations <-
-  function(sim_file_names,
-           min_deltas = seq(0, 0.50, 0.01),
-           minus_log_alphas = seq(from = 1, to = 10, by = 0.1)) {
-    sim_results_colnames <-
-      c(
-        "test",
-        "permuation_type" ,
-        "min_delta",
-        "minus_log_alpha",
-        "n_signfincant_CpG",
-        "name"
-      )
-    sim_results <- data.frame()
-
-    for (n in 1:length(sim_file_names)) {
-      start_time <- Sys.time()
-      #load data
-      sim_listfile <-
-        readRDS(file = sim_file_names[n])
-      sim <- sim_listfile$data
-
-      sim_file_name <- basename(sim_file_names[n])
-
-
-      # allocated df
-      temp_sim <-
-        data.frame(matrix(
-          nrow = length(min_deltas) * length(minus_log_alphas),
-          ncol = length(sim_results_colnames)
-        ))
-      colnames(temp_sim) <- sim_results_colnames
-
-      temp_sim$name <-
-        gsub(x = sim_file_name,
-             pattern = ".rds",
-             replacement = "")
-      temp_sim$test <-
-        gsub(pattern = "\\..*",
-             replacement = "",
-             x = sim_file_name)
-      sub_string <-
-        gsub(
-          pattern = paste(temp_sim$test[1], ".|.rds", sep = ""),
-          replacement = "",
-          x = sim_file_name
-        )
-      temp_sim$permuation_type <-
-        gsub(pattern = "\\..*",
-             replacement = "",
-             x = sub_string)
-      temp_sim$minus_log_alpha <-
-        rep(
-          x = minus_log_alphas,
-          times = length(min_deltas),
-          length.out = NA,
-          each = 1
-        )
-      temp_sim$min_delta <-
-        rep(
-          x = min_deltas,
-          times = 1,
-          length.out = NA,
-          each = length(minus_log_alphas)
-        )
-
-    #   # pre define function inside to speed up calculation process
-    #   if (identical(tolower(temp_sim$test[1]), "pearson")) {
-    #     get_n_significant <-
-    #       function(minus_log_alpha, min_delta) {
-    #         return(sum(
-    #           sim$pearson.p_val < exp(-minus_log_alpha) &
-    #             sim$pearson.delta > min_delta,
-    #           na.rm = TRUE
-    #         ))
-    #       }
-    #   }else{
-    #   # KW test
-    #   get_n_significant <-
-    #     function(minus_log_alpha, min_delta) {
-    #       return(sum(
-    #         sim$kw.p_val < exp(-minus_log_alpha) &
-    #           sim$kw.delta > min_delta,
-    #         na.rm = TRUE
-    #       ))
-    #     }
-    # }
-    #    browser()
-    # temp_sim$n_signfincant_CpG <-
-    #   mapply(
-    #     FUN = get_n_significant,
-    #     minus_log_alpha = temp_sim$minus_log_alpha,
-    #     min_delta = temp_sim$min_delta,
-    #     SIMPLIFY = TRUE
-    #   )
-
-      colnames(sim) <- c("p_val","statistic","delta")
-      temp_sim$n_signfincant_CpG <-
-        mapply(
-          minus_log_alpha = temp_sim$minus_log_alpha,
-          min_delta = temp_sim$min_delta,
-          FUN = get_n_significant,
-          MoreArgs = list(df=sim)
-        )
-      
-    # append results
-    sim_results <- rbind(sim_results, temp_sim)
-    end_time <- Sys.time()
-    print(end_time - start_time)
-
-    }
-    return(sim_results)
-  }
-
-
-#' counts significant pval with different alpha and delta cut off
-#' for given p val = exp(-minus_log_alpha) and delta
-#' @param sim_file_names with the  column name $test_type.pval
-#' and $test_type.delta
-#' @param minus_log_alphas define minimum pval = exp(-minus_log_alpha)
-#' @param min_deltas define minimum delta to be reached to be counted
-#' @returns dataframe with number of signifincat pvals for each combination
-#' in each file
 parallel_summerize_permutations <-
   function(sim_file_names,
            min_deltas = seq(0, 0.50, 0.01),
@@ -596,6 +476,7 @@ parallel_summerize_permutations <-
   }
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
+  print("create_true_stat")
   # compute sample numbers per CpG position
   start_time <- Sys.time()
   df_peak_CpG$score <-
@@ -635,8 +516,13 @@ if (create_true_stat) {
           df_kruskall_valis)
   saveRDS(
     object = df_peak_CpG_complete_with_test,
-    file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds")
-  )
+    file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
+  
+  
+  saveRDS(object = list(permuation_order = NA ,sim_typisation = real_food_typisation , data = df_peak_CpG_complete_with_test[,KW_test_colnames]),
+          file = file.path(OUTPUT_FOLDER, "KW.real.rds"))
+  saveRDS(object = list(permuation_order = NA ,sim_typisation = real_age_typisation , data = df_peak_CpG_complete_with_test[,pearson_test_colnames]) ,
+          file = file.path(OUTPUT_FOLDER, "pearson.real.rds"))
 } else{
   df_peak_CpG_complete_with_test <-
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
@@ -645,8 +531,9 @@ if (create_true_stat) {
 # Calculate simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
+  print("create_permutations_horizonal_columns")
   dir.create(path = file.path(OUTPUT_FOLDER,"simulation"), showWarnings = FALSE)
-  n_repetitions <- 99 
+  n_repetitions <- 100
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -688,198 +575,39 @@ if (create_permutations_horizonal_columns) {
 
 # Evaluate simulations ----------------------------------------------------
 if(summerize_horizonal_columns_permutations){
-  
+  print("summerize_horizonal_columns_permutations")
   # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
 
   file_names <- list.files(path = file.path(OUTPUT_FOLDER, "simulation"),
                            pattern = "*.horizontal.*")
-
+  start_time <- Sys.time()
   sim_results <-
-    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names[1:15]))
-
-  ############################################# code works 25 sec #############
-  df_simulation.stats <-
-    data.frame(
-      file_name = list.files(
-        path = file.path(OUTPUT_FOLDER, "simulation"),
-        pattern = "*.horizontal.*"
-      )#,
-      #hemming.distance_permuation = NA,
-      #permuation_order = NA
-    )
-  
-  #sim_file_names 
-  
-  min_deltas <- seq(0, 0.50, 0.01)
-  minus_log_alphas <- seq(from = 1, to = 10, by = 0.1)
-  sim_results_colnames <-
-    c(
-      "test",
-      "permuation_type" ,
-      "min_delta",
-      "minus_log_alpha",
-      "n_signfincant_CpG",
-      "name"
-    )
-  sim_results <- data.frame()
-  
-  for (n in 1:nrow(df_simulation.stats)) {
-    start_time <- Sys.time()
-    #n <- 1
-    print(n)
-
-    temp_sim <-
-      data.frame(matrix(
-        nrow = length(min_deltas) * length(minus_log_alphas),
-        ncol = length(sim_results_colnames)
-      ))
-    colnames(temp_sim) <- sim_results_colnames
-    
-    #
-    # "name",
-    # "test",
-    # "permuation_type" ,
-    # "min_delta",
-    # "minus_log_alpha",
-    # "n_signfincant_CpG",
-    
-    temp_sim$name <-
-      gsub(x = df_simulation.stats$file_name[n],
-           pattern = ".rds",
-           replacement = "")
-    temp_sim$test <-
-      gsub(pattern = "\\..*",
-           replacement = "",
-           x = df_simulation.stats$file_name[n])
-    sub_string <-
-      gsub(
-        pattern = paste(temp_sim$test[1], ".|.rds", sep = ""),
-        replacement = "",
-        x = df_simulation.stats$file_name[n]
-      )
-    temp_sim$permuation_type <-
-      gsub(pattern = "\\..*",
-           replacement = "",
-           x = sub_string)
-    temp_sim$minus_log_alpha <-
-      rep(
-        x = minus_log_alphas,
-        times = length(min_deltas),
-        length.out = NA,
-        each = 1
-      )
-    temp_sim$min_delta <-
-      rep(
-        x = min_deltas,
-        times = 1,
-        length.out = NA,
-        each = length(minus_log_alphas)
-      )
-  
-    #load data
-    sim_listfile <-
-      readRDS(file.path(
-        OUTPUT_FOLDER,
-        "simulation",
-        df_simulation.stats$file_name[n]
-      ))
-    
-    sim <- sim_listfile$data
-    #permuation_order <- sim_listfile$permuation_order
-    
-    colnames(sim) <- c("p_val","statistic","delta")
-    
-    get_n_significant <- function(minus_log_alpha, min_delta) {
-      alpha <- exp(-minus_log_alpha)
-      return(sum(sim$p_val < alpha & sim$delta > min_delta, na.rm = TRUE))
-    }
-    
-      temp_sim$n_signfincant_CpG <-
-      mapply(FUN = get_n_significant ,  temp_sim$minus_log_alpha, temp_sim$min_delta)
-    
-    sim_results <- rbind(sim_results, temp_sim)
-    
-    end_time <- Sys.time()
-    print(end_time - start_time)
-  }
-  
-  # string_permuation_order <-
-  #   gsub(pattern = "Kruskal_Wallis.type.label_shuffle.|.rds",
-  #        replacement = "",
-  #        x = df_simulation.stats$file_name)
-  # df_simulation.stats$permuation_order <- string_permuation_order
-  
-  # permuation_orders <-
-  #   lapply(
-  #     X = string_permuation_order,
-  #     FUN = function(string) {
-  #       numbers <- as.numeric(unlist(strsplit(x = string, split = "\\.")))
-  #       return(as.vector(numbers))
-  #     }
-  #   )
-  
-  # type_real_order1 <-
-  #   as.numeric(factor(
-  #     real_sample_typisation$type,
-  #     levels = c("Farmer", "HG", "Steppe")
-  #   ))
-  # type_real_order2 <-
-  #   as.numeric(factor(
-  #     real_sample_typisation$type,
-  #     levels = c("Steppe", "Farmer", "HG")
-  #   ))
-  # type_real_order3 <-
-  #   as.numeric(factor(
-  #     real_sample_typisation$type,
-  #     levels = c("HG", "Steppe", "Farmer")
-  #   ))
-  #
-  # df_simulation.stats$hemming.distance_permuation <-
-  #   sapply(
-  #     permuation_orders,
-  #     FUN =  function(permutation_order) {
-  #       type_permutation_order <-
-  #         as.numeric(factor(real_sample_typisation$type[permutation_order]))
-  #       d1 <- sum(type_real_order1 != type_permutation_order)
-  #       d2 <- sum(type_real_order2 != type_permutation_order)
-  #       d3 <- sum(type_real_order3 != type_permutation_order)
-  #       return(min(c(d1, d2, d3)))
-  #     }
-  #   )
-  
-  # permutation_order <- permuation_orders[[1]]
-  # type_permutation_order <- as.numeric(factor(real_sample_typisation$type[permutation_order]))
-  # d1 <- sum(type_real_order1 != type_permutation_order)
-  # d2 <- sum(type_real_order2 != type_permutation_order)
-  # d3 <- sum(type_real_order3 != type_permutation_order)
-  
-  
-  
-  # print("spaical case of sim number 8 is very significant")
-  # as.numeric(factor(real_sample_typisation$type[permuation_orders[[8]]]))
-  # as.numeric(factor(real_sample_typisation$type))
-  # significant_sample_typisation <- real_sample_typisation
-  # significant_sample_typisation$group <- as.numeric(factor(real_sample_typisation$type[permuation_orders[[8]]]))
-  # meta$significant_sample_typisation
-  #
-  # saveRDS(object = significant_sample_typisation$group,file = file.path(OUTPUT_FOLDER,"significant_sample_typisation.rds"))
-  
-
-}
+    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
+  end_time <- Sys.time()
+  print(end_time - start_time)
+ 
 saveRDS(object = sim_results,file = file.path(OUTPUT_FOLDER,"horizontal.sim_results.rds"))
-###########################################################################
+}
 
-# real data
+# Evaluate real values ----------------------------------------------------
+if(summerize_real_values){
+  print("summerize_real_values")
+file_names <- list.files(path = file.path(OUTPUT_FOLDER),
+                         pattern = "*.real.*")
+start_time <- Sys.time()
+real_results <-
+  parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
+end_time <- Sys.time()
+print(end_time - start_time)
+}
+
+
+###########################################################################
 ################################################################
 
-get_n_significant <- function(minus_log_alpha, min_delta) {
-  p_expr <- paste("exp(-", minus_log_alpha, ")", sep = "")
-  alpha <- eval(parse(text = p_expr))
-  n_signfincant_CpG <-
-    sum(df_CpG$KW_p_val < alpha &
-          df_CpG$type_delta > min_delta, na.rm = TRUE)
-}
 
+  
+  
 real_results <-
   data.frame(matrix(
     nrow = length(min_deltas) * length(minus_log_alphas),
@@ -911,6 +639,9 @@ real_results$n_signfincant_CpG <-
 
 
 # aggirgate means
+# real data
+  print("OTHER")
+if(OTHER){
 ################################################################
 
 df_empirical_means <-
@@ -1008,3 +739,4 @@ saveRDS(
 # p <- ggplot(data = df_empirical_means,
 #             mapping = aes(x = min_log_p, y = real_count / count)) + geom_point() + theme_minimal() +
 #   ggtitle(min_delta, "min_delta")
+}
