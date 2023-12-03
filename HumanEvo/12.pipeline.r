@@ -91,6 +91,7 @@ KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
 # set running parameters -------------------------------------------------------
 create_true_stat <- FALSE
 create_permutations_horizonal_columns <- FALSE
+summerize_CpG_columns_permutations <- FALSE
 summerize_horizonal_columns_permutations <- FALSE
 summerize_real_values <- TRUE
 OTHER <- FALSE
@@ -379,6 +380,12 @@ get_n_significant  <-
                  df$delta > min_delta, na.rm = TRUE))
   }
 
+# parallel_compute_delta_pval_landscape <- function(sim_listfile,
+#                                                   min_deltas = seq(0, 0.50, 0.01),
+#                                                   minus_log_alphas = seq(from = 1, to = 10, by = 0.1)) {
+#   mcmapply
+# }
+ 
 #' counts significant pval with different alpha and delta cut off
 #' for given p val = exp(-minus_log_alpha) and delta
 #' @param sim_file_names with the  column name $test_type.pval
@@ -474,6 +481,77 @@ parallel_summerize_permutations <-
     parallel::stopCluster(cl = my.cluster)
     return(sim_results)
   }
+
+
+
+#' create CpG permuartion for each column in dataframe 
+#' @param df with the  column name df$sample and
+#' methylation values that will be permuted inseide 
+#' @param typisation define permuted columns 
+#' @returns list with permuted dataframe $data and 
+#' list of permuation_order in each column in $permuation_order
+create_CpG_permution <- function(df,typisation){
+  
+  permuation_order <- list()
+
+  n_CpG <- nrow(df)
+  for(i in 1:nrow(typisation)){
+    permuation <- sample(1:n_CpG)
+    df[,typisation$sample[i]] <- df[permuation,typisation$sample[i]]
+    permuation_order[[typisation$sample[i]]] <- permuation
+  }
+  df <- df[, !colnames(df) %in% 
+       c(pearson_test_colnames,KW_test_colnames)]
+  return(list(data = df,permuation_order = permuation_order))
+}
+
+#' create a linear correlation plot meth vs age from row  in dataframe row 
+#' @param df_row is a row in the CpG dataframe with 
+#' columnnames like the typisation$sample 
+#' @param typisation age typisation (can be permuted for showing sillulated values)
+#' @returns plot with linear correlation line meth cs age
+plot_age_correlation <- function(df_row, typisation) {
+  df_plot <- typisation
+  df_plot$meth <- as.numeric(df_row[, typisation$sample])
+  
+  p<- ggplot(data = df_plot,
+             mapping = aes(x = age_mean_BP, y = meth)) + 
+    ggtitle(label = paste(df_row$chrom, df_row$start),
+            subtitle = paste("p_val: ",format.pval(df_row$pearson.p_val))) +
+    geom_point() +
+    ylim(0,1)+
+    xlab("sample age estimation in Years before Present")+
+    ylab("CpG methylation")+
+    geom_smooth(method = "lm",)+
+    theme_minimal()
+  
+  
+  return(p)
+}
+
+
+#' create a KW test boxplot from row  in dataframe row 
+#' @param df_row is a row in the CpG dataframe with 
+#' columnnames like the typisation$sample 
+#' @param typisation food typisation (can be permuted for simulated values)
+#' @returns boxplot with KW pvalue and gemonic position in title
+plot_food_correlation <- function(df_row, typisation) {
+  df_plot <- typisation
+  df_plot$meth <- as.numeric(df_row[, typisation$sample])
+  
+  p<- ggplot(data = df_plot,
+             mapping = aes(x = Type, y = meth,color = Type)) + 
+    ggtitle(label = paste(df_row$chrom, df_row$start),
+            subtitle = paste("p_val: ",format.pval(df_row$kw.p_val))) +
+    geom_boxplot() + 
+    geom_point(position = "jitter") +
+    ylim(0,1)+
+    xlab("sample food Type")+
+    ylab("CpG methylation")+
+    theme_minimal()
+  return(p)
+}
+
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
   print("create_true_stat")
@@ -528,7 +606,7 @@ if (create_true_stat) {
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
 }
 
-# Calculate simulations --------------------------------------------------
+# Calculate column permutation simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
@@ -573,7 +651,76 @@ if (create_permutations_horizonal_columns) {
   }
 }
 
-# Evaluate simulations ----------------------------------------------------
+# Calculate CpG permuation simulations --------------------------------------------------
+
+if (create_CpG_permutations_vertical) {
+  print("create_CpG_permutations_vertical")
+  dir.create(path = file.path(OUTPUT_FOLDER,"simulation"), showWarnings = FALSE)
+  n_repetitions <- 2
+  for (rep in 1:n_repetitions) {
+    # rep <- 1
+    start_time <- Sys.time()
+    print(rep)
+    
+    time_string <- format(start_time, "%Y_%m_%d_%H_%M_%S")
+    
+    permutation_CpG <- create_CpG_permution(df_peak_CpG_complete_with_test,real_age_typisation)
+    
+    df_permuted <- permutation_CpG$data
+    
+    permutation_age <- list()
+    permutation_age$typisation <- real_age_typisation
+    permutation_age$permuation_order <- permutation_CpG$permuation_order
+    
+    permutation_food <- list()
+    permutation_food$typisation <- real_food_typisation
+    permutation_food$permuation_order <- permutation_CpG$permuation_order
+    
+    permutation_age$data <- parallel_testing_pearson_cor(df = df_permuted,age.typisation = real_age_typisation)
+    permutation_food$data <- parallel_testing_kruskall_valis(df = df_permuted, food.typisation = real_food_typisation)
+    
+    # save age permutation 
+    sim_age_file_name <-
+      paste("pearson",
+            "CpG_permutation",
+            time_string,
+            "rds",
+            sep = ".")
+    saveRDS(object = permutation_age,
+            file = file.path(OUTPUT_FOLDER, "simulation", sim_age_file_name))   
+    
+    # save food permutation 
+    sim_food_file_name <-
+      paste("KW",
+            "CpG_permutation",
+            time_string,
+            "rds",
+            sep = ".")
+    saveRDS(object = permutation_food,
+            file = file.path(OUTPUT_FOLDER, "simulation", sim_food_file_name))   
+    
+    end_time <- Sys.time()
+    print(end_time - start_time)
+  }
+}
+
+
+# Evaluate CpG simulations ----------------------------------------------------
+if(summerize_CpG_columns_permutations){
+  print("summerize_CpG_columns_permutations")
+  # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
+  
+  file_names <- list.files(path = file.path(OUTPUT_FOLDER, "simulation"),
+                           pattern = "*.CpG_permutation.*")
+  start_time <- Sys.time()
+  sim_results <-
+    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
+  end_time <- Sys.time()
+  print(end_time - start_time)
+  
+  saveRDS(object = sim_results,file = file.path(OUTPUT_FOLDER,"CpG_permutation.sim_results.rds"))
+}
+# Evaluate horizontal simulations ----------------------------------------------------
 if(summerize_horizonal_columns_permutations){
   print("summerize_horizonal_columns_permutations")
   # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
@@ -596,53 +743,18 @@ file_names <- list.files(path = file.path(OUTPUT_FOLDER),
                          pattern = "*.real.*")
 start_time <- Sys.time()
 real_results <-
-  parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
+  parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER,file_names))
 end_time <- Sys.time()
 print(end_time - start_time)
+saveRDS(object = real_results,file = file.path(OUTPUT_FOLDER,"real_results.rds"))
 }
 
+# aggregate results -------------------------------------------------------
 
-###########################################################################
-################################################################
+real_results <- readRDS(file = file.path(OUTPUT_FOLDER,"real_results.rds"))
+#sim_results <- readRDS(file = file.path(OUTPUT_FOLDER,"horizontal.sim_results.rds"))
+sim_results <- readRDS(file = file.path(OUTPUT_FOLDER,"CpG_permutation.sim_results.rds"))
 
-
-  
-  
-real_results <-
-  data.frame(matrix(
-    nrow = length(min_deltas) * length(minus_log_alphas),
-    ncol = length(sim_results_colnames)
-  ))
-colnames(real_results) <- sim_results_colnames
-
-real_results$name <- "real_data"
-real_results$type <- "real"
-real_results$hemming.distance_permuation <-
-  df_simulation.stats$hemming.distance_permuation[n]
-real_results$permuation_order = paste(1:37, collapse = ".")
-real_results$minus_log_alpha <-
-  rep(
-    x = minus_log_alphas,
-    times = length(min_deltas),
-    length.out = NA,
-    each = 1
-  )
-real_results$min_delta <-
-  rep(
-    x = min_deltas,
-    times = 1,
-    length.out = NA,
-    each = length(minus_log_alphas)
-  )
-real_results$n_signfincant_CpG <-
-  mapply(FUN = get_n_significant ,  real_results$minus_log_alpha, real_results$min_delta)
-
-
-# aggirgate means
-# real data
-  print("OTHER")
-if(OTHER){
-################################################################
 
 df_empirical_means <-
   aggregate(n_signfincant_CpG ~ min_delta + minus_log_alpha + permuation_type + test,
@@ -652,27 +764,32 @@ df_empirical_means <-
 
 df_empirical_means <-
   df_empirical_means[order(df_empirical_means$min_delta,
-                           df_empirical_means$minus_log_alpha), ]
+                           df_empirical_means$minus_log_alpha,
+                           df_empirical_means$test), ]
 
 df_empirical_means$real_count <-
-  real_results$n_signfincant_CpG[order(real_results$min_delta, real_results$minus_log_alpha)]
+  real_results$n_signfincant_CpG[order(real_results$min_delta, real_results$minus_log_alpha,real_results$test)]
 
 df_empirical_means$FDR <-
   df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
 
-library(plotly)
+saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_empirical_means.rds"))
+# plot kw landscape -------------------------------------------------------
 
-plot_ly(
-  df_empirical_means,
-  x = ~ min_delta ,
-  y = ~ minus_log_alpha,
-  z = ~ FDR
-)
+min_alpha <- 5
+max_alpha <- 10
+min_delta <- 0.1
+test <- "KW"
+min_real_count <- 2
 
 search_df <-
-  df_empirical_means[df_empirical_means$minus_log_alpha < 10, ]
+  df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
+                       df_empirical_means$minus_log_alpha <= max_alpha &
+                       df_empirical_means$min_delta > min_delta &
+                       df_empirical_means$test == test & 
+                       min_real_count <= df_empirical_means$real_count,]
 
-plot_ly(
+plotly::plot_ly(
   search_df ,
   x = ~ min_delta ,
   y = ~ minus_log_alpha,
@@ -683,6 +800,122 @@ plot_ly(
     showscale = TRUE
   )
 )
+
+best_values <- search_df[which.min(search_df$FDR),]
+best_CpGs <-
+  df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$kw.delta >= best_values$min_delta &
+                                   df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha), ]
+
+folder_name <- paste(
+  "delta",
+  best_values$min_delta,
+  "minLogP",
+  best_values$minus_log_alpha,
+  sep = "_"
+)
+
+dir.create(path = file.path(OUTPUT_FOLDER,"results","kw",folder_name), showWarnings = FALSE)
+
+
+saveRDS(object = best_CpGs,
+        file = file.path(
+          OUTPUT_FOLDER,
+          "results",
+          "kw",
+          folder_name,
+          "best_CpGs.rds"
+        ))
+for(r in 1:nrow(best_CpGs)){
+ p <-  plot_food_correlation(df_row = best_CpGs[r,],typisation = real_food_typisation)
+ ggsave(plot = p,filename = file.path(
+   OUTPUT_FOLDER,
+   "results",
+   "kw",
+   folder_name,
+   paste(
+     best_CpGs$chrom[r],
+     best_CpGs$start[r],
+     ".png",
+     sep = "."
+   )))
+}
+# plot pearson landscape --------------------------------------------------
+
+min_alpha <- 5
+max_alpha <- 10
+min_delta <- 0.2
+test <- "pearson"
+min_real_count <- 2
+
+search_df <-
+  df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
+                       df_empirical_means$minus_log_alpha <= max_alpha &
+                       df_empirical_means$min_delta > min_delta &
+                       df_empirical_means$test == test & 
+                       min_real_count <= df_empirical_means$real_count,]
+
+plotly::plot_ly(
+  search_df ,
+  x = ~ min_delta ,
+  y = ~ minus_log_alpha,
+  z = ~ FDR ,
+  marker = list(
+    color = ~ FDR,
+    colorscale = c('#683531', '#FFE1A1'),
+    showscale = TRUE
+  )
+)
+
+best_values <- search_df[which.min(search_df$FDR), ]
+best_CpGs <- df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= best_values$min_delta &
+                                              df_peak_CpG_complete_with_test$pearson.p_val <= exp(-best_values$minus_log_alpha),]
+
+folder_name <- paste(
+  "delta",
+  best_values$min_delta,
+  "minLogP",
+  best_values$minus_log_alpha,
+  sep = "_"
+)
+
+dir.create(path = file.path(OUTPUT_FOLDER,"results","pearson",folder_name), showWarnings = FALSE)
+
+
+saveRDS(object = best_CpGs,
+        file = file.path(
+          OUTPUT_FOLDER,
+          "results",
+          "pearson",
+          folder_name,
+          "best_CpGs.rds"
+        ))
+for(r in 1:nrow(best_CpGs)){
+  p <-  plot_age_correlation(df_row = best_CpGs[r,],typisation = real_age_typisation)
+  ggsave(plot = p,filename = file.path(
+    OUTPUT_FOLDER,
+    "results",
+    "pearson",
+    folder_name,
+    paste(
+      best_CpGs$chrom[r],
+      best_CpGs$start[r],
+      ".png",
+      sep = "."
+    )))
+}
+
+# plot sim vs real --------------------------------------------------------
+
+
+plot_age_correlation(df_row = df_peak_CpG_complete_with_test[5,],typisation = real_age_typisation)
+
+plot_food_correlation(df_row = df_peak_CpG_complete_with_test[5,],typisation = real_food_typisation)
+
+
+  print("OTHER")
+if(OTHER){
+library(plotly)
+
 
 search_df[which.min(search_df$FDR), ]
 
