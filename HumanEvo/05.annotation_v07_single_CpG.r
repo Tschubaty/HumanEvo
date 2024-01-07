@@ -127,8 +127,6 @@ for(r in 1:nrow(df_CpG)){
   }
 }
 
-
-
 write.csv2(
   x = unique(df_CpG$GeneAnnotation),
   file = file.path(
