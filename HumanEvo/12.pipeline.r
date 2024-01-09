@@ -1114,11 +1114,17 @@ df_empirical_means$FDR <-
 #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
 # plot kw landscape -------------------------------------------------------
 
-min_alpha <- 5
+min_alpha <- 6
 max_alpha <- 10
 min_delta <- 0.1
 test <- "KW"
 min_real_count <- 2
+
+
+# min(best_CpGs$start)
+# [1] 29633535
+# > max(best_CpGs$start)
+# [1] 29633767
 
 search_df <-
   df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
@@ -1178,8 +1184,28 @@ for (r in 1:nrow(best_CpGs)) {
             best_CpGs$start[r],
             ".png",
             sep = ".")
+    ),
+    width = 5,
+    height = 5
+  )
+  
+  p <-
+    plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
+  ggsave(
+    plot = p,
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      test,
+      folder_name,
+      paste("linear",
+        best_CpGs$chrom[r],
+            best_CpGs$start[r],
+            ".png",
+            sep = ".")
     )
   )
+  
 }
 # plot pearson landscape --------------------------------------------------
 if (pearson_landscape) {
@@ -1321,8 +1347,9 @@ if (OTHER) {
 }
 # gene annotation --------------------------------------------------------
 if(gene_annotation){
-  min_delta <- 0.39
-  minus_log_p <- 9.3
+  min_delta <- best_values$min_delta
+  minus_log_p <- best_values$minus_log_alpha
+  test <- "kw"
   
   folder_name <- paste("delta",
                        min_delta,
@@ -1335,7 +1362,7 @@ if(gene_annotation){
     file = file.path(
       OUTPUT_FOLDER,
       "results",
-      "pearson",
+      test,
       folder_name,
       "best_CpGs.rds"
     ))
@@ -1350,7 +1377,7 @@ if(gene_annotation){
     file = file.path(
       OUTPUT_FOLDER,
       "results",
-      "pearson",
+      test,
       folder_name,
       "best_CpGs.bed"
     ),
@@ -1369,7 +1396,7 @@ if(gene_annotation){
     file =  file.path(
       OUTPUT_FOLDER,
       "results",
-      "pearson",
+      test,
       folder_name,
       "hgTables.txt"
     ),
@@ -1403,10 +1430,10 @@ if(gene_annotation){
     file = file.path(
       OUTPUT_FOLDER,
       "results",
-      "pearson",
+      test,
       folder_name,
       paste(
-        "unique.genes.age_vs_meth",
+        "unique.genes",
         min_delta,
         "delta.GH_Interactions",
         "p",
@@ -1480,7 +1507,6 @@ p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = old))+
   theme_minimal()+
   xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
   ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
 
 ##
 # "Country" 
