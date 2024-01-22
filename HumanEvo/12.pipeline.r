@@ -92,14 +92,19 @@ KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
 # set running parameters -------------------------------------------------------
 H3K27ac_Analysis <- FALSE
 create_true_stat <- FALSE
-describe_Data <- TRUE
+describe_Data <- FALSE
 create_permutations_horizonal_columns <- FALSE
+create_CpG_permutations_vertical <- FALSE
 summerize_CpG_columns_permutations <- FALSE
 summerize_horizonal_columns_permutations <- FALSE
 summerize_real_values <- FALSE
+histogramm_plots <- FALSE
+aggregate_CpG_results <- FALSE
+plot_kw_landscape <- FALSE
 pearson_landscape <- FALSE
 OTHER <- FALSE
 gene_annotation <- FALSE
+plot_PCA <- FALSE
 
 # load Data ---------------------------------------------------------------
 
@@ -108,7 +113,9 @@ df_peak_CpG <-
     "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/H3K27ac.only.39.samples.merged.hg19.rds"
   )
 meta <- as.data.frame(readxl::read_xlsx("AGDP.39.metadata2.xlsx"))
-meta <- meta[order(meta$age_mean_BP), ]
+meta <- meta[order(meta$age_mean_BP),]
+meta$sample <- factor(x = meta$sample, levels = meta$sample)
+
 real_age_typisation <-
   meta[order(meta$age_mean_BP), c("sample", "age_mean_BP")]
 real_food_typisation <-
@@ -265,9 +272,12 @@ parallel_testing_pearson_cor <- function(df, age.typisation) {
   clusterExport(clus, deparse(substitute(age.typisation)))
   
   df_meth <-
-    df[, age.typisation$sample[order(age.typisation$age_mean_BP)]]
+    df[, as.character(age.typisation$sample[order(age.typisation$age_mean_BP)])]
   age <-
     age.typisation$age_mean_BP[order(age.typisation$age_mean_BP)]
+  
+  # Export it form base to workspace
+  clusterExport(clus, "age")
   
   print("pearson delta")
   # delta = difference between max and min recorded methylation score
@@ -298,6 +308,7 @@ parallel_testing_pearson_cor <- function(df, age.typisation) {
         }
       }
     )
+  
   print("pearson pval")
   # extract pval
   pearson.p_val <- sapply(
@@ -386,6 +397,37 @@ get_n_significant  <-
                  df$delta > min_delta, na.rm = TRUE))
   }
 
+#' counts number of significant values with positive statistic 
+#' for given p val and delta requirements
+#' @param df with the  column name $pval
+#' and $delta
+#' @param minus_log_alpha define minimum pval = exp(-minus_log_alpha)
+#' @param min_delta define minimum delta to be reached to be counted
+#' @returns number of signifincat pvals
+get_positive_significant  <-
+  function(df, minus_log_alpha, min_delta) {
+    return(sum(df$p_val < exp(-minus_log_alpha) &
+                 df$delta > min_delta &
+                 df$statistic > 0, 
+               na.rm = TRUE))
+  }
+
+
+#' counts number of significant values with negative statistic 
+#' for given p val and delta requirements
+#' @param df with the  column name $pval
+#' and $delta
+#' @param minus_log_alpha define minimum pval = exp(-minus_log_alpha)
+#' @param min_delta define minimum delta to be reached to be counted
+#' @returns number of signifincat pvals
+get_negative_significant  <-
+  function(df, minus_log_alpha, min_delta) {
+    return(sum(df$p_val < exp(-minus_log_alpha) &
+                 df$delta > min_delta &
+                 df$statistic < 0, 
+               na.rm = TRUE))
+  }
+
 # parallel_compute_delta_pval_landscape <- function(sim_listfile,
 #                                                   min_deltas = seq(0, 0.50, 0.01),
 #                                                   minus_log_alphas = seq(from = 1, to = 10, by = 0.1)) {
@@ -411,13 +453,16 @@ parallel_summerize_permutations <-
         "min_delta",
         "minus_log_alpha",
         "n_signfincant_CpG",
-        "name"
-      )
+        "negative_signfincant_CpG",
+        "positive_signfincant_CpG",
+        "name")
     
     #create and register cluster
     n.cores <- parallel::detectCores() - 1
     my.cluster <- parallel::makeCluster(n.cores)
     clusterExport(my.cluster, "get_n_significant")
+    clusterExport(my.cluster, "get_negative_significant")
+    clusterExport(my.cluster, "get_positive_significant")
     doParallel::registerDoParallel(cl = my.cluster)
     
     sim_results <- foreach(n = 1:length(sim_file_names),
@@ -483,6 +528,22 @@ parallel_summerize_permutations <-
                                  MoreArgs = list(df = sim)
                                )
                              
+                             temp_sim$negative_signfincant_CpG <- 
+                               mapply(
+                                 minus_log_alpha = temp_sim$minus_log_alpha,
+                                 min_delta = temp_sim$min_delta,
+                                 FUN = get_negative_significant,
+                                 MoreArgs = list(df = sim)
+                               )
+                             
+                             temp_sim$positive_signfincant_CpG <- 
+                               mapply(
+                                 minus_log_alpha = temp_sim$minus_log_alpha,
+                                 min_delta = temp_sim$min_delta,
+                                 FUN = get_positive_significant,
+                                 MoreArgs = list(df = sim)
+                               )
+                             
                              # append results
                              return(temp_sim)
                            }
@@ -504,11 +565,11 @@ create_CpG_permution <- function(df, typisation) {
   n_CpG <- nrow(df)
   for (i in 1:nrow(typisation)) {
     permuation <- sample(1:n_CpG)
-    df[, typisation$sample[i]] <-
-      df[permuation, typisation$sample[i]]
-    permuation_order[[typisation$sample[i]]] <- permuation
+    df[, as.character(typisation$sample[i])] <-
+      df[permuation, as.character(typisation$sample[i])]
+    permuation_order[[as.character(typisation$sample[i])]] <- permuation
   }
-  df <- df[, !colnames(df) %in%
+  df <- df[,!colnames(df) %in%
              c(pearson_test_colnames, KW_test_colnames)]
   return(list(data = df, permuation_order = permuation_order))
 }
@@ -530,9 +591,10 @@ plot_age_correlation <- function(df_row, typisation) {
     ) +
     geom_point() +
     ylim(0, 1) +
+    xlim(0, 11500) +
     xlab("sample age estimation in Years before Present") +
     ylab("CpG methylation") +
-    geom_smooth(method = "lm",) +
+    geom_smooth(method = "lm", ) +
     theme_minimal()
   
   
@@ -579,9 +641,10 @@ if (H3K27ac_Analysis) {
       OUTPUT_FOLDER,
       "results",
       "H3K27ac",
-      paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = "."))
-      
-    if(file.exists(file_name)){
+      paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = ".")
+    )
+    
+    if (file.exists(file_name)) {
       next
     }
     # cut out only coordinates per chromosome
@@ -621,8 +684,7 @@ if (H3K27ac_Analysis) {
     print(end_time - start_time)
     
     saveRDS(object = df_chr,
-            file = file_name
-            )
+            file = file_name)
     
     ggplot(data = df_chr, mapping = aes(x = state, fill = state)) +
       geom_histogram(stat = "count") +
@@ -647,21 +709,31 @@ if (H3K27ac_Analysis) {
       OUTPUT_FOLDER,
       "results",
       "H3K27ac",
-      paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = "."))
+      paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = ".")
+    )
     df_chr <- readRDS(file = file_name)
-    all_CpG_states_hg19 <- rbind(all_CpG_states_hg19,df_chr)
+    all_CpG_states_hg19 <- rbind(all_CpG_states_hg19, df_chr)
   }
   
-  saveRDS(object = all_CpG_states_hg19,file = 
-            file_name <- file.path(
-              OUTPUT_FOLDER,
-              "results",
-              "H3K27ac",
-              "all_CpG_states_hg19.rds"))
-
-  p <- ggplot(data = all_CpG_states_hg19, mapping = aes(x = state, fill = state)) +
+  saveRDS(
+    object = all_CpG_states_hg19,
+    file =
+      file_name <- file.path(
+        OUTPUT_FOLDER,
+        "results",
+        "H3K27ac",
+        "all_CpG_states_hg19.rds"
+      )
+  )
+  
+  p <-
+    ggplot(data = all_CpG_states_hg19, mapping = aes(x = state, fill = state)) +
     geom_histogram(stat = "count") +
-    ggtitle(paste(ANNOTATION, "genome wide CpG distribution according Chromatin state", sep = " ")) +
+    # ggtitle(paste(
+    #   ANNOTATION,
+    #   "genome wide CpG distribution according Chromatin state",
+    #   sep = " "
+    # )) +
     ggplot2::theme(
       axis.line = ggplot2::element_line(colour = "black"),
       panel.background = ggplot2::element_blank(),
@@ -671,119 +743,149 @@ if (H3K27ac_Analysis) {
         vjust = 0.5,
         hjust = 1
       )
+    )+
+    ylab("# of CpGs in chromatin state") +
+    xlab("chromatin state labeling")
+  
+  
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER,
+                         "results",
+                         "H3K27ac",
+                         "all_CpG_states.png")
+    ,
+    plot = p,
+    width = 10,
+    height = 6
+  )
+  
+  
+  
+  # all_chromatin_seg
+  all_chromatin_seg <- data.frame()
+  for (n_chr in 1:length(CHR_NAMES)) {
+    print(n_chr)
+    file_name <- file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "H3K27ac",
+      paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = ".")
     )
-  
-  
-  ggsave(filename = file.path(
-    OUTPUT_FOLDER,
-    "results",
-    "H3K27ac",
-    "all_CpG_states.png")
-    ,plot = p,width = 10,height = 6)
-}
-
-
-# all_chromatin_seg
-all_chromatin_seg <- data.frame()
-for (n_chr in 1:length(CHR_NAMES)) {
-  print(n_chr)
-  file_name <- file.path(
-    OUTPUT_FOLDER,
-    "results",
-    "H3K27ac",
-    paste(CHR_NAMES[n_chr], "CpG_annotation", "rds", sep = "."))
-  
-  # load state annotation
-  chr_chromatin_seg <-
-    readRDS(
-      paste(
-        "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/Chromatin/processed/",
-        paste(CHR_NAMES[n_chr], "chromatin_seg_annotaion_name", "RDS", sep = "."),
-        sep = ""
+    
+    # load state annotation
+    chr_chromatin_seg <-
+      readRDS(
+        paste(
+          "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/Chromatin/processed/",
+          paste(CHR_NAMES[n_chr], "chromatin_seg_annotaion_name", "RDS", sep = "."),
+          sep = ""
+        )
       )
+    all_chromatin_seg <- rbind(all_chromatin_seg, chr_chromatin_seg)
+  }
+  
+  
+  
+  all_chromatin_seg$length <-
+    all_chromatin_seg$end - all_chromatin_seg$start
+  
+  # compute coverage
+  coverage <-
+    aggregate(
+      x = all_chromatin_seg$length,
+      by = list(Category = all_chromatin_seg$state),
+      FUN = sum
     )
-  all_chromatin_seg <- rbind(all_chromatin_seg,chr_chromatin_seg)
+  # compute total CpG
+  n_CpG <-
+    aggregate(
+      all_CpG_states_hg19$strand,
+      by = list(all_CpG_states_hg19$state),
+      FUN = length
+    )
+  # compute CpG in H3K27ac
+  # H3K27ac_CpG <-
+  #   aggregate(
+  #     all_CpG_states_hg19$name[all_CpG_states_hg19$name != "NO_CHIP"],
+  #     by = list(all_CpG_states_hg19$state[all_CpG_states_hg19$name != "NO_CHIP"]),
+  #     FUN = length
+  #   )
+  
+  H3K27ac_CpG <-
+    aggregate(
+      all_CpG_states_hg19$name != "NO_CHIP" ,
+      by = list(
+        all_CpG_states_hg19$state,
+        all_CpG_states_hg19$name != "NO_CHIP"
+      ),
+      FUN = length
+    )
+  
+  not_H3K27ac_CpG <-
+    H3K27ac_CpG[!H3K27ac_CpG$Group.2, c("Group.1", "x")]
+  
+  state_segementation_meta <-
+    data.frame(
+      state = coverage$Category,
+      coverage = coverage$x,
+      n_CpG = n_CpG$x,
+      not_H3K27ac_CpG = not_H3K27ac_CpG$x
+    )
+  state_segementation_meta$H3K27ac_CpG <-
+    state_segementation_meta$n_CpG - state_segementation_meta$not_H3K27ac_CpG
+  
+  state_segementation_meta$state_fraction_is_H3K27ac <-
+    state_segementation_meta$H3K27ac_CpG / state_segementation_meta$n_CpG
+  
+  state_segementation_meta$state <-
+    factor(x = state_segementation_meta$state,
+           levels = state_segementation_meta$state[order(as.numeric(
+             gsub('_.*', replacement = "", x = state_segementation_meta$state)
+           ))])
+  
+  
+  p <-
+    ggplot(
+      data = state_segementation_meta,
+      mapping = aes(x = state, y = state_fraction_is_H3K27ac * 100, fill = state)
+    ) +
+    geom_bar(stat = "identity") +
+    ggplot2::theme(
+      axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
+    ) +
+    ylim(0, 100) +
+    ylab("% of CpGs covered by H3K27ac peaks in bone sample") +
+    xlab("genome segment chromatin state labeling")
+  
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER,
+                         "results",
+                         "H3K27ac",
+                         "H3K27ac_coverage.png")
+    ,
+    plot = p,
+    width = 10,
+    height = 6
+  )
+  
+  print("# of CpG in Genome: ")
+  n_CpG_genome <- sum(state_segementation_meta$n_CpG)
+  print(n_CpG_genome)
+  print("# of CpG in H3K27Ac: ")
+  n_CpG_H3K27ac <- sum(state_segementation_meta$H3K27ac_CpG)
+  print(n_CpG_H3K27ac)
+  print("fraction h3K27AC:")
+  print(n_CpG_H3K27ac / n_CpG_genome)
 }
 
 
-
-all_chromatin_seg$length <- all_chromatin_seg$end - all_chromatin_seg$start
-
-# compute coverage
-coverage <- aggregate(x = all_chromatin_seg$length, by=list(Category=all_chromatin_seg$state), FUN=sum)
-# compute total CpG
-n_CpG <- aggregate(all_CpG_states_hg19$strand, by=list(all_CpG_states_hg19$state), FUN=length)
-# compute CpG in H3K27ac
-# H3K27ac_CpG <-
-#   aggregate(
-#     all_CpG_states_hg19$name[all_CpG_states_hg19$name != "NO_CHIP"],
-#     by = list(all_CpG_states_hg19$state[all_CpG_states_hg19$name != "NO_CHIP"]),
-#     FUN = length
-#   )
-
-H3K27ac_CpG <-
-  aggregate(
-    all_CpG_states_hg19$name != "NO_CHIP" ,
-    by = list(all_CpG_states_hg19$state,all_CpG_states_hg19$name != "NO_CHIP"),
-    FUN = length
-  )
-
-not_H3K27ac_CpG <- H3K27ac_CpG[!H3K27ac_CpG$Group.2,c("Group.1","x")]
-
-state_segementation_meta <-
-  data.frame(
-    state = coverage$Category,
-    coverage = coverage$x,
-    n_CpG = n_CpG$x,
-    not_H3K27ac_CpG = not_H3K27ac_CpG$x
-  )
-state_segementation_meta$H3K27ac_CpG <- state_segementation_meta$n_CpG - state_segementation_meta$not_H3K27ac_CpG
-
-state_segementation_meta$state_fraction_is_H3K27ac <- state_segementation_meta$H3K27ac_CpG/state_segementation_meta$n_CpG
-
-state_segementation_meta$state <-
-  factor(x = state_segementation_meta$state,
-         levels = state_segementation_meta$state[order(as.numeric(
-           gsub('_.*', replacement = "", x = state_segementation_meta$state)
-         ))]
-  )
-         
-                                           
-p <-
-  ggplot(
-    data = state_segementation_meta,
-    mapping = aes(x = state, y = state_fraction_is_H3K27ac * 100, fill = state)
-  ) +
-  geom_bar(stat = "identity") +
-  ggplot2::theme(
-    axis.line = ggplot2::element_line(colour = "black"),
-    panel.background = ggplot2::element_blank(),
-    legend.position = "none",
-    axis.text.x = element_text(
-      angle = 90,
-      vjust = 0.5,
-      hjust = 1
-    )
-  ) +
-  ylim(0,100)+
-  ylab("% of CpGs covered by H3K27ac peaks in bone sample") +
-  xlab("genome segment chromatin state labeling")
-
-ggsave(filename = file.path(
-  OUTPUT_FOLDER,
-  "results",
-  "H3K27ac",
-  "H3K27ac_coverage.png")
-  ,plot = p,width = 10,height = 6)
-
-print("# of CpG in Genome: ")
-n_CpG_genome <- sum(state_segementation_meta$n_CpG)
-print(n_CpG_genome)
-print("# of CpG in H3K27Ac: ")
-n_CpG_H3K27ac <- sum(state_segementation_meta$H3K27ac_CpG)
-print(n_CpG_H3K27ac)
-print("fraction h3K27AC:")
-print(n_CpG_H3K27ac/n_CpG_genome)
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
   print("create_true_stat")
@@ -803,7 +905,7 @@ if (create_true_stat) {
   ), "% of CpG positions"))
   # discard CpG with not full data
   df_peak_CpG_complete <-
-    df_peak_CpG[nrow(real_age_typisation) == df_peak_CpG$score, ]
+    df_peak_CpG[nrow(real_age_typisation) == df_peak_CpG$score,]
   
   # compute real data value kruskall_valis
   start_time <- Sys.time()
@@ -852,55 +954,121 @@ if (create_true_stat) {
 }
 
 
-# discribe Data ---------------------------------------------------------------
-if(describe_Data) {
-  p <- ggplot(data = df_peak_CpG_complete_with_test, 
-         mapping = aes(x = pearson.delta)) +
-    geom_histogram(breaks = seq(from = 0, to = 1, by = 0.01)) + 
-    theme_minimal()+
-    xlab("maximum methylation difference between the samples")
-  
-  ggsave(filename = file.path(
-    OUTPUT_FOLDER,
-    "plots",
-    "maximum methylation difference between the samples.png")
-    ,plot = p,width = 10,height = 6)
-  
-  p <- ggplot(data = df_peak_CpG_complete_with_test, 
+# describe Data ---------------------------------------------------------------
+if (describe_Data) {
+  p <- ggplot(data = df_peak_CpG_complete_with_test,
               mapping = aes(x = pearson.delta)) +
-    geom_histogram(breaks = seq(from = 0, to = 1, by = 0.01)) + 
-    theme_minimal()+
+    geom_histogram(breaks = seq(from = 0, to = 1, by = 0.01)) +
+    theme_minimal() +
     xlab("maximum methylation difference between the samples")
   
-  ggsave(filename = file.path(
-    OUTPUT_FOLDER,
-    "plots",
-    "maximum methylation difference between the samples.png")
-    ,plot = p,width = 10,height = 6)
+  ggsave(
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "plots",
+      "maximum methylation difference between the samples.png"
+    )
+    ,
+    plot = p,
+    width = 10,
+    height = 6
+  )
+  
+  p <- ggplot(data = df_peak_CpG_complete_with_test,
+              mapping = aes(x = pearson.delta)) +
+    geom_histogram(breaks = seq(from = 0, to = 1, by = 0.01)) +
+    theme_minimal() +
+    xlab("maximum methylation difference between the samples")
+  
+  ggsave(
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "plots",
+      "maximum methylation difference between the samples.png"
+    )
+    ,
+    plot = p,
+    width = 10,
+    height = 6
+  )
   
   library(data.table)
-  long <- melt(setDT(df_peak_CpG_complete_with_test[meta$sample]), id.vars = c(), variable.name = "sample")
+  long <-
+    melt(
+      setDT(df_peak_CpG_complete_with_test[meta$sample]),
+      id.vars = c(),
+      variable.name = "sample"
+    )
   meth_long <- as.data.frame(long)
   
-  p <- ggplot(data = meth_long, 
-         mapping = aes(x = sample,y = value,color = sample)) +
-    geom_violin(trim=FALSE) + 
-    theme_minimal()+
-    xlab("samples")+
-    ylab("methylation")+
+  p <- ggplot(data = meth_long,
+              mapping = aes(x = sample, y = value, color = sample)) +
+    geom_violin(trim = FALSE) +
+    theme_minimal() +
+    xlab("samples") +
+    ylab("methylation") +
     coord_flip()
   
-  ggsave(filename = file.path(
-    OUTPUT_FOLDER,
-    "plots",
-    "methylation values in samples.png"),
-    plot = p,width = 8,height = 16)
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER,
+                         "plots",
+                         "methylation values in samples.png"),
+    plot = p,
+    width = 8,
+    height = 16
+  )
   
   
-  print(paste("number of CpG in peaks:",nrow(df_peak_CpG)))
-  print(paste("number of CpG in peaks with data:",nrow(df_peak_CpG_complete_with_test)))
+  print(paste("number of CpG in peaks:", nrow(df_peak_CpG)))
+  print(paste(
+    "number of CpG in peaks with data:",
+    nrow(df_peak_CpG_complete_with_test)
+  ))
   min_delta = 0.39
-  paste("number of CpG in peaks with data with min_delta:",sum(df_peak_CpG_complete_with_test$pearson.delta >= min_delta))
+  paste(
+    "number of CpG in peaks with data with min_delta:",
+    sum(df_peak_CpG_complete_with_test$pearson.delta >= min_delta)
+  )
+  
+  
+  p <-
+    ggplot(data = meta,
+           mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP +
+                        age_std_BP),
+                  width = .1) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(
+      angle = 0,
+      vjust = 0.5,
+      hjust = 1
+    )) +
+    scale_y_continuous(
+      breaks = seq(0, 11000, by = 1000),
+      # labels = rep("",13),
+      limits = c(0, 11500),
+      expand = c(0, 0)
+    ) +
+    ylab("years before present (B.P.)") +
+    xlab("sample ID") +
+    scale_color_discrete(name = "lifestyle/diet") +
+    theme(
+      strip.text.x = element_blank(),
+      strip.background = element_rect(colour = "white", fill = "white"),
+      legend.position = c(.9, .4)
+    )+
+    coord_flip()
+  
+  
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER,
+                         "plots",
+                         "Age of samples.png"),
+    plot = p,
+    width = 8,
+    height = 8
+  )
   
 }
 # Calculate column permutation simulations --------------------------------------------------
@@ -967,7 +1135,7 @@ if (create_CpG_permutations_vertical) {
   print("create_CpG_permutations_vertical")
   dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 60
+  n_repetitions <- 6
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -1026,7 +1194,7 @@ if (create_CpG_permutations_vertical) {
 
 
 # Evaluate CpG simulations ----------------------------------------------------
-if (summerize_CpG_columns_permutations) {
+if (summerize_CpG_columns_permutations) { 
   print("summerize_CpG_columns_permutations")
   # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
   
@@ -1043,7 +1211,130 @@ if (summerize_CpG_columns_permutations) {
     object = sim_results,
     file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results.rds")
   )
+  
 }
+
+###############
+if(histogramm_plots){
+delta <- 0.39  
+cut_off <- 6
+alpha_p <- 9.3
+
+sim_results <- readRDS(file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results.rds"))
+sim_results_pearson_horizontal <- readRDS(file =file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds"))
+
+sim_results_pearson_CpG <- sim_results[sim_results$test == "pearson",]
+sim_results_pearson_horizontal <- sim_results_pearson_horizontal[sim_results_pearson_horizontal$test == "pearson",]
+
+
+df_plot <- rbind(sim_results_pearson_CpG[,c("min_delta" , "n_signfincant_CpG","name")],
+                 sim_results_pearson_CpG[,c("min_delta" , "n_signfincant_CpG","name")])
+df_plot_horizontal <- rbind(sim_results_pearson_horizontal[,c("min_delta" , "n_signfincant_CpG","name")],
+                            sim_results_pearson_horizontal[,c("min_delta" , "n_signfincant_CpG","name")])
+
+df_plot$significant <- c(sim_results_pearson_CpG$positive_signfincant_CpG,
+                         sim_results_pearson_CpG$negative_signfincant_CpG)
+df_plot_horizontal$significant <- c(sim_results_pearson_horizontal$positive_signfincant_CpG,
+                                    sim_results_pearson_horizontal$negative_signfincant_CpG)
+
+df_plot$alpha <- c(sim_results_pearson_CpG$minus_log_alpha,
+                   -sim_results_pearson_CpG$minus_log_alpha)
+df_plot_horizontal$alpha <- c(sim_results_pearson_horizontal$minus_log_alpha,
+                   -sim_results_pearson_horizontal$minus_log_alpha)
+
+
+
+# prepare real resluts 
+real_results_pearson <- real_results[real_results$test == "pearson",]
+
+
+df_plot_real <- rbind(real_results_pearson[,c("min_delta" , "n_signfincant_CpG","name")],
+                      real_results_pearson[,c("min_delta" , "n_signfincant_CpG","name")])
+
+df_plot_real$significant <- c(real_results_pearson$positive_signfincant_CpG,
+                              real_results_pearson$negative_signfincant_CpG)
+
+df_plot_real$alpha <- c(real_results_pearson$minus_log_alpha,
+                   -real_results_pearson$minus_log_alpha)
+##########
+df_plot_real_1 <- df_plot_real[df_plot_real$min_delta == delta,] 
+df_plot_1 <- df_plot[df_plot$min_delta == delta,]
+df_plot_horizontal_1 <- df_plot_horizontal[df_plot_horizontal$min_delta == delta,]
+
+
+p <- ggplot(data = df_plot_1[abs(as.numeric(df_plot$alpha)) > cut_off,] ,mapping = aes(x = alpha,y = significant,group = alpha))+
+         geom_boxplot(color = "green",outlier.shape = NA)+
+  geom_boxplot(data = df_plot_horizontal_1[abs(as.numeric(df_plot_horizontal_1$alpha)) > cut_off,],
+               mapping = aes(x = alpha,y = significant,group = alpha),
+               color = "blue",
+               outlier.shape = NA)+
+  geom_point(data = df_plot_real_1[abs(as.numeric(df_plot_real_1$alpha)) > cut_off,],color = "red")+
+  theme_minimal()+
+  scale_color_discrete(name = "Dose", labels = c("CpG permuatation", "age permuation", "real data"))
+
+folder_name <- paste("delta",delta,"minLogP",alpha,sep = "_")
+file_name <- "CDF_p_value destribution.png"
+
+ggsave(filename = file.path(OUTPUT_FOLDER,"results","pearson",folder_name,file_name ),
+       plot = p,
+       width = 8,
+       height = 8)
+
+#####
+# df_plot_single_delta<- df_plot[abs(as.numeric(df_plot$alpha)) == alpha_p,]
+# df_plot_real <- df_plot_real[abs(as.numeric(df_plot_real$alpha)) == alpha_p,]
+# df_plot_horizontal <- df_plot_horizontal[abs(as.numeric(df_plot_horizontal$alpha)) == alpha_p,]
+
+
+# df_plot_CpG<- df_plot[abs(as.numeric(df_plot$alpha)) == alpha_p,]
+# df_plot_real <- df_plot_real[abs(as.numeric(df_plot_real$alpha)) == alpha_p,]
+# df_plot_horizontal <- df_plot_horizontal[abs(as.numeric(df_plot_horizontal$alpha)) == alpha_p,]
+
+df_plot_CpG <- df_plot
+df_plot_CpG$slope <- ifelse(df_plot_CpG$alpha < 0,yes =  "negative", no = "positive")
+df_plot_CpG$name <- "pearson.CpG_permutation"
+
+df_plot_real$slope <- ifelse(df_plot_real$alpha < 0,yes =  "negative", no = "positive")
+
+df_plot_horizontal$slope <- ifelse(df_plot_horizontal$alpha < 0,yes =  "negative", no = "positive")
+df_plot_horizontal$name <- "pearson.horizontal"
+
+df_plot_all <- rbind(df_plot_CpG ,df_plot_real,df_plot_horizontal)
+
+df_plot_all$minus_log_p <- abs(df_plot_all$alpha)
+df_plot_all$alpha_string <- as.character(df_plot_all$minus_log_p)
+
+
+#df_plot_single_delta$alpha <- factor(df_plot_single_delta$alpha,levels = sort(unique(df_plot_single_delta$alpha)))
+#df_plot_single_delta$alpha <- as.character(df_plot_single_delta$alpha)
+
+ggplot(data = df_plot_all[df_plot_all$min_delta == delta & as.numeric(df_plot_all$alpha) > cut_off,],
+       mapping = aes(x = alpha,y = significant,fill = name))+
+  geom_boxplot(outlier.shape = NA)
+
+
+df_plot_single <- df_plot_all[df_plot_all$min_delta == delta & 
+                                df_plot_all$minus_log_p == alpha_p,
+                              c("name","slope" ,"significant")]
+
+p <- ggplot(data = df_plot_single,
+       mapping = aes(x = slope,y = significant,colour= name))+
+  geom_boxplot(outlier.shape = NA) +
+  geom_point(outlier.shape = NA,
+             position = position_jitterdodge(jitter.width = 0.25))+
+  theme_minimal()
+
+
+file_name <- "count destribution age and CpG permutation.png"
+
+ggsave(filename = file.path(OUTPUT_FOLDER,"results","pearson",folder_name,file_name ),
+       plot = p,
+       width = 8,
+       height = 8)
+}
+
+####################
+
 # Evaluate horizontal simulations ----------------------------------------------------
 if (summerize_horizonal_columns_permutations) {
   print("summerize_horizonal_columns_permutations")
@@ -1076,9 +1367,82 @@ if (summerize_real_values) {
   print(end_time - start_time)
   saveRDS(object = real_results,
           file = file.path(OUTPUT_FOLDER, "real_results.rds"))
+  
+  # df_plot <- df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.p_val < 0.01,]
+  # ggplot(data = df_plot ,mapping = aes(x = pearson.statistic))+
+  #          geom_histogram(binwidth = 0.1)
+  
+  
+  
+  #pearson.real <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/real_results.rds")
+  
 }
 
-# aggregate results -------------------------------------------------------
+# aggregate CpG results -------------------------------------------------------
+if(aggregate_CpG_results){
+
+real_results <-
+  readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
+#sim_results <-
+#  readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds"))
+sim_results <- readRDS(file = file.path(OUTPUT_FOLDER,"CpG_permutation.sim_results.rds"))
+
+
+df_empirical_means <-
+  aggregate(
+    n_signfincant_CpG ~ min_delta + minus_log_alpha + permuation_type + test,
+    sim_results,
+    FUN =
+      mean
+  )
+
+df_empirical_means <-
+  df_empirical_means[order(
+    df_empirical_means$min_delta,
+    df_empirical_means$minus_log_alpha,
+    df_empirical_means$test
+  ),]
+
+df_empirical_means$real_count <-
+  real_results$n_signfincant_CpG[order(real_results$min_delta,
+                                       real_results$minus_log_alpha,
+                                       real_results$test)]
+
+df_empirical_means$FDR <-
+  df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
+
+saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_CpG_vertical_empirical_means.rds"))
+#saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
+
+ggplot(data = sim_results[sim_results$min_delta == 0.39,],
+       mapping = aes(x = minus_log_alpha,
+                     y = n_signfincant_CpG,
+                     color = name))+
+  geom_point()+ 
+  theme(legend.position = "none")
+
+
+for(delta in unique(sim_results$min_delta)) {
+  print(delta)
+  sims_delta <- sim_results[sim_results$min_delta == delta, ]
+
+  for (minus_log_alpha in seq(from = 5, to = 10, by = 1)) {
+    print(head(real_results[real_results$min_delta == delta &
+                              real_results$minus_log_alpha == minus_log_alpha, ]))
+    for (t in unique(sims_delta$test)) {
+      print(t)
+      sims<-
+        sims_delta[sims_delta$minus_log_alpha == minus_log_alpha & sims_delta$test == t, ]
+      sims <- sims[order(sims$n_signfincant_CpG, decreasing = TRUE), ]
+      print(head(sims, 3))
+      print(nrow(sims))
+    }
+  }
+}
+
+
+}
+# aggregate horizontal results -------------------------------------------------------
 
 real_results <-
   readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
@@ -1100,7 +1464,7 @@ df_empirical_means <-
     df_empirical_means$min_delta,
     df_empirical_means$minus_log_alpha,
     df_empirical_means$test
-  ), ]
+  ),]
 
 df_empirical_means$real_count <-
   real_results$n_signfincant_CpG[order(real_results$min_delta,
@@ -1111,116 +1475,27 @@ df_empirical_means$FDR <-
   df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
 
 #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_CpG_vertical_empirical_means.rds"))
-#saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
+saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
 # plot kw landscape -------------------------------------------------------
-
-min_alpha <- 6
-max_alpha <- 10
-min_delta <- 0.1
-test <- "KW"
-min_real_count <- 2
-
-
-# min(best_CpGs$start)
-# [1] 29633535
-# > max(best_CpGs$start)
-# [1] 29633767
-
-search_df <-
-  df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
-                       df_empirical_means$minus_log_alpha <= max_alpha &
-                       df_empirical_means$min_delta > min_delta &
-                       df_empirical_means$test == test &
-                       min_real_count <= df_empirical_means$real_count,]
-
-plotly::plot_ly(
-  search_df ,
-  x = ~ min_delta ,
-  y = ~ minus_log_alpha,
-  z = ~ FDR ,
-  marker = list(
-    color = ~ FDR,
-    colorscale = c('#683531', '#FFE1A1'),
-    showscale = TRUE
-  )
-)
-
-best_values <- search_df[which.min(search_df$FDR),]
-best_CpGs <-
-  df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$kw.delta >= best_values$min_delta &
-                                   df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha), ]
-
-folder_name <- paste("delta",
-                     best_values$min_delta,
-                     "minLogP",
-                     best_values$minus_log_alpha,
-                     sep = "_")
-
-dir.create(
-  path = file.path(OUTPUT_FOLDER, "results", "kw", folder_name),
-  showWarnings = FALSE
-)
-
-
-saveRDS(
-  object = best_CpGs,
-  file = file.path(OUTPUT_FOLDER,
-                   "results",
-                   "kw",
-                   folder_name,
-                   "best_CpGs.rds")
-)
-for (r in 1:nrow(best_CpGs)) {
-  p <-
-    plot_food_correlation(df_row = best_CpGs[r,], typisation = real_food_typisation)
-  ggsave(
-    plot = p,
-    filename = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "kw",
-      folder_name,
-      paste(best_CpGs$chrom[r],
-            best_CpGs$start[r],
-            ".png",
-            sep = ".")
-    ),
-    width = 5,
-    height = 5
-  )
-  
-  p <-
-    plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
-  ggsave(
-    plot = p,
-    filename = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      paste("linear",
-        best_CpGs$chrom[r],
-            best_CpGs$start[r],
-            ".png",
-            sep = ".")
-    )
-  )
-  
-}
-# plot pearson landscape --------------------------------------------------
-if (pearson_landscape) {
+if (plot_kw_landscape) {
   min_alpha <- 6
-  max_alpha <- 10
-  min_delta <- 0.2
-  test <- "pearson"
+  max_alpha <- 8.5
+  min_delta <- 0.1
+  test <- "KW"
   min_real_count <- 2
+  
+  
+  # min(best_CpGs$start)
+  # [1] 29633535
+  # > max(best_CpGs$start)
+  # [1] 29633767
   
   search_df <-
     df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
                          df_empirical_means$minus_log_alpha <= max_alpha &
                          df_empirical_means$min_delta > min_delta &
                          df_empirical_means$test == test &
-                         min_real_count <= df_empirical_means$real_count,]
+                         min_real_count <= df_empirical_means$real_count, ]
   
   plotly::plot_ly(
     search_df ,
@@ -1236,8 +1511,98 @@ if (pearson_landscape) {
   
   best_values <- search_df[which.min(search_df$FDR), ]
   best_CpGs <-
+    df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$kw.delta >= best_values$min_delta &
+                                     df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha),]
+  
+  folder_name <- paste("delta",
+                       best_values$min_delta,
+                       "minLogP",
+                       best_values$minus_log_alpha,
+                       sep = "_")
+  
+  dir.create(
+    path = file.path(OUTPUT_FOLDER, "results", "kw", folder_name),
+    showWarnings = FALSE
+  )
+  
+  
+  saveRDS(
+    object = best_CpGs,
+    file = file.path(OUTPUT_FOLDER,
+                     "results",
+                     "kw",
+                     folder_name,
+                     "best_CpGs.rds")
+  )
+  for (r in 1:nrow(best_CpGs)) {
+    p <-
+      plot_food_correlation(df_row = best_CpGs[r, ], typisation = real_food_typisation)
+    ggsave(
+      plot = p,
+      filename = file.path(
+        OUTPUT_FOLDER,
+        "results",
+        "kw",
+        folder_name,
+        paste(best_CpGs$chrom[r],
+              best_CpGs$start[r],
+              ".png",
+              sep = ".")
+      ),
+      width = 5,
+      height = 5
+    )
+    
+    p <-
+      plot_age_correlation(df_row = best_CpGs[r, ], typisation = real_age_typisation)
+    ggsave(
+      plot = p,
+      filename = file.path(
+        OUTPUT_FOLDER,
+        "results",
+        test,
+        folder_name,
+        paste("linear",
+              best_CpGs$chrom[r],
+              best_CpGs$start[r],
+              ".png",
+              sep = ".")
+      )
+    )
+    
+  }
+}
+# plot pearson landscape --------------------------------------------------
+if (pearson_landscape) {
+  min_alpha <- 6
+  max_alpha <- 10 # 8.5
+  min_delta <- 0.2
+  test <- "pearson"
+  min_real_count <- 2
+  
+  search_df <-
+    df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
+                         df_empirical_means$minus_log_alpha <= max_alpha &
+                         df_empirical_means$min_delta > min_delta &
+                         df_empirical_means$test == test &
+                         min_real_count <= df_empirical_means$real_count, ]
+  
+  plotly::plot_ly(
+    search_df ,
+    x = ~ min_delta ,
+    y = ~ minus_log_alpha,
+    z = ~ FDR ,
+    marker = list(
+      color = ~ FDR,
+      colorscale = c('#683531', '#FFE1A1'),
+      showscale = TRUE
+    )
+  )
+  
+  best_values <- search_df[which.min(search_df$FDR),]
+  best_CpGs <-
     df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= best_values$min_delta &
-                                     df_peak_CpG_complete_with_test$pearson.p_val <= exp(-best_values$minus_log_alpha),]
+                                     df_peak_CpG_complete_with_test$pearson.p_val <= exp(-best_values$minus_log_alpha), ]
   
   folder_name <- paste("delta",
                        best_values$min_delta,
@@ -1263,7 +1628,7 @@ if (pearson_landscape) {
   )
   for (r in 1:nrow(best_CpGs)) {
     p <-
-      plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
+      plot_age_correlation(df_row = best_CpGs[r, ], typisation = real_age_typisation)
     ggsave(
       plot = p,
       filename = file.path(
@@ -1283,19 +1648,19 @@ if (pearson_landscape) {
 if (OTHER) {
   library(plotly)
   print("OTHER")
-  plot_age_correlation(df_row = df_peak_CpG_complete_with_test[5,], typisation = real_age_typisation)
+  plot_age_correlation(df_row = df_peak_CpG_complete_with_test[5, ], typisation = real_age_typisation)
   
-  plot_food_correlation(df_row = df_peak_CpG_complete_with_test[5,], typisation = real_food_typisation)
+  plot_food_correlation(df_row = df_peak_CpG_complete_with_test[5, ], typisation = real_food_typisation)
   
-  search_df[which.min(search_df$FDR), ]
+  search_df[which.min(search_df$FDR),]
   
   best_ex <-
     df_CpG[!is.na(df_CpG$KW_p_val) &
              df_CpG$type_delta > 0.25 &
-             df_CpG$KW_p_val < exp(-9.3), ]
+             df_CpG$KW_p_val < exp(-9.3),]
   
-  ex1 <- best_ex[1, ]
-  ex2 <- best_ex[2, ]
+  ex1 <- best_ex[1,]
+  ex2 <- best_ex[2,]
   
   
   df_plot <- data.frame(matrix(nrow = N_SAMPLES, ncol = 0))
@@ -1322,7 +1687,7 @@ if (OTHER) {
   
   
   df_CpG[!is.na(df_CpG$KW_p_val) &
-           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3), ]
+           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3),]
   
   # min_delta minus_log_alpha n_signfincant_CpG real_count   FDR
   #    0.08             6.4              93.6        300 0.312
@@ -1334,7 +1699,7 @@ if (OTHER) {
   # min_delta minus_log_alpha n_signfincant_CpG real_count   FDR
   #    0.25             9.3              0.17          2    0.085
   df_CpG[!is.na(df_CpG$KW_p_val) &
-           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3), ]
+           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3),]
   
   saveRDS(
     object = df_empirical_means,
@@ -1346,7 +1711,7 @@ if (OTHER) {
   #   ggtitle(min_delta, "min_delta")
 }
 # gene annotation --------------------------------------------------------
-if(gene_annotation){
+if (gene_annotation) {
   min_delta <- best_values$min_delta
   minus_log_p <- best_values$minus_log_alpha
   test <- "kw"
@@ -1359,28 +1724,25 @@ if(gene_annotation){
   
   best_CpGs <- readRDS(
     object = ,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      "best_CpGs.rds"
-    ))
+    file = file.path(OUTPUT_FOLDER,
+                     "results",
+                     test,
+                     folder_name,
+                     "best_CpGs.rds")
+  )
   
   nrow(best_CpGs)
   
   
-  bed4 <- best_CpGs[,c("chrom","start","end","name")]
+  bed4 <- best_CpGs[, c("chrom", "start", "end", "name")]
   
   write.table(
     x = bed4,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      "best_CpGs.bed"
-    ),
+    file = file.path(OUTPUT_FOLDER,
+                     "results",
+                     test,
+                     folder_name,
+                     "best_CpGs.bed"),
     quote = FALSE,
     row.names = FALSE,
     col.names = FALSE
@@ -1393,37 +1755,44 @@ if(gene_annotation){
   # Big Bed File Download: /gbdb/hg19/geneHancer/geneHancerInteractionsDoubleElite.v2.hg19.bb
   
   df_GH <- read.delim(
-    file =  file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      "hgTables.txt"
-    ),
+    file =  file.path(OUTPUT_FOLDER,
+                      "results",
+                      test,
+                      folder_name,
+                      "hgTables.txt"),
     header = FALSE,
     skip = 1,
     col.names = colnames(best_CpGs)[1:5]
   )
   
-  best_CpGs$GeneAnnotation <-NA
+  best_CpGs$GeneAnnotation <- NA
   best_CpGs$EnhancerAnnotation <- NA
   
-  for(r in 1:nrow(best_CpGs)){
+  for (r in 1:nrow(best_CpGs)) {
     # r <- 1
-    annotated_GH <- df_GH[best_CpGs$chrom[r] == df_GH$chrom &  df_GH$start <= best_CpGs$start[r] & best_CpGs$end[r] <= df_GH$end,]
+    annotated_GH <-
+      df_GH[best_CpGs$chrom[r] == df_GH$chrom &
+              df_GH$start <= best_CpGs$start[r] &
+              best_CpGs$end[r] <= df_GH$end, ]
     # if any annotation found
-    if(nrow(annotated_GH) > 0){
-      # choose annotation with highest score 
-      annotation <- unlist(strsplit(annotated_GH$name[which.max(annotated_GH$score)], split = "/")) #annotated_GH$name[which.max(annotated_GH$score)]
-      # get highest score 
-      best_CpGs$score <- annotated_GH$score[which.max(annotated_GH$score)]
+    if (nrow(annotated_GH) > 0) {
+      # choose annotation with highest score
+      annotation <-
+        unlist(strsplit(annotated_GH$name[which.max(annotated_GH$score)], split = "/")) #annotated_GH$name[which.max(annotated_GH$score)]
+      # get highest score
+      best_CpGs$score <-
+        annotated_GH$score[which.max(annotated_GH$score)]
       best_CpGs$GeneAnnotation[r] <- annotation[1]
       best_CpGs$EnhancerAnnotation[r] <- annotation[2]
     }
   }
   
-  print(paste("#of annotated enhancers : ",length(unique(best_CpGs$EnhancerAnnotation))))
-  print(paste("#of annotated genes : ",length(unique(best_CpGs$GeneAnnotation))))
+  print(paste("#of annotated enhancers : ", length(unique(
+    best_CpGs$EnhancerAnnotation
+  ))))
+  print(paste("#of annotated genes : ", length(unique(
+    best_CpGs$GeneAnnotation
+  ))))
   
   write.csv2(
     x = unique(best_CpGs$GeneAnnotation),
@@ -1445,132 +1814,237 @@ if(gene_annotation){
     quote = FALSE,
     row.names = FALSE,
     col.names = FALSE
-  )  
+  )
 }
 
 # PCA --------------------------------------------------------
-
-
-meta37 <- meta[meta$sample %in% real_food_typisation$sample,]
-data_meth <- t(df_peak_CpG_complete_with_test[,real_food_typisation$sample])
-#print("erase non complete rows")
-#print(sum(complete.cases(df_peak_CpG_complete_with_test)/nrow(data_meth)))
-
-pca_prcomp_res <- prcomp(data_meth)
-
-pca_summery <- summary(pca_prcomp_res)$importance[2,]
-
-saveRDS(object = pca_prcomp_res,file =  file.path(OUTPUT_FOLDER,paste("pca_prcomp_res","N_SAMPLES","37","rds",sep = ".")))
-
-df_pca <- cbind(meta37,pca_prcomp_res$x)
-
-# sex
-p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = sex))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_1v2 & sex")+
-  theme_minimal()+
-  xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
-  ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_sex_N_SAMPLES_37.png"),width=8, height=6)
-
-# sex
-p_pca <- ggplot(data = df_pca ,aes(x=PC3, y=PC4,label = sample,color = sex))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_3v4 & sex")+
-  theme_minimal()+
-  xlab(paste("PC3 : ",pca_summery[3]*100,"%"))+
-  ylab(paste("PC4 : ",pca_summery[4]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_3v4_vs_sex_N_SAMPLES_37.png"),width=8, height=6)
-
-
-# locality
-# p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = Locality))+
-#   geom_point()+
-#   ggrepel::geom_text_repel()+
-#   labs(subtitle="PCA_1v2 & locality")
-# 
-# ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_locality_N_SAMPLES_37.png"),width=16, height=6)
-
-df_pca$old <-  df_pca$age_mean_BP >= 5700
-
-
-##
-# "OLD" 
-p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = old))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_1v2 & OLD >= 5700Y")+
-  theme_minimal()+
-  xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
-  ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
-##
-# "Country" 
-p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = Country))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_1v2 & Country")+
-  theme_minimal()+
-  xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
-  ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_Country.png"),width=10, height=6)
-
-p_pca <- ggplot(data = df_pca ,aes(x=PC3, y=PC4,label = sample,color = Country))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_3v4 & Country")+
-  theme_minimal()+
-  xlab(paste("PC3 : ",pca_summery[3]*100,"%"))+
-  ylab(paste("PC4 : ",pca_summery[4]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_3v4_vs_Country.png"),width=10, height=6)
-
-
-##
-# "age" 
-p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = age_mean_BP))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_1v2 & age")+
-  theme_minimal()+
-  xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
-  ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_age.png"),width=10, height=6)
-
-p_pca <- ggplot(data = df_pca ,aes(x=PC3, y=PC4,label = sample,color = age_mean_BP))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_3v4 & age")+
-  theme_minimal()+
-  xlab(paste("PC3 : ",pca_summery[3]*100,"%"))+
-  ylab(paste("PC4 : ",pca_summery[4]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_3v4_vs_age.png"),width=10, height=6)
-
-## Type
-
-p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = Type))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_1v2 & Type")+
-  theme_minimal()+
-  xlab(paste("PC1 : ",pca_summery[1]*100,"%"))+
-  ylab(paste("PC2 : ",pca_summery[2]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_Type.png"),width=10, height=6)
-
-p_pca <- ggplot(data = df_pca ,aes(x=PC3, y=PC4,label = sample,color = Type))+
-  geom_point()+
-  ggrepel::geom_text_repel()+
-  labs(subtitle="PCA_3v4 & Type")+
-  theme_minimal()+
-  xlab(paste("PC3 : ",pca_summery[3]*100,"%"))+
-  ylab(paste("PC4 : ",pca_summery[4]*100,"%"))
-
-ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_3v4_vs_Type.png"),width=10, height=6)
+if (plot_PCA) {
+  #is_NORMALIZED <- TRUE
+  meta37 <- meta[meta$sample %in% as.character(real_food_typisation$sample), ]
+  data_meth <-
+    df_peak_CpG_complete_with_test[, as.character(real_food_typisation$sample)]
+  #print("erase non complete rows")
+  data_meth <- data_meth[complete.cases(data_meth), ]
+  data_meth <-
+    t(data_meth)
+  
+  #print(sum(complete.cases(df_peak_CpG_complete_with_test)/nrow(data_meth)))
+  #data_meth <- as.numeric(data_meth)
+  
+  data_meth_with_variance <- data_meth[ , which(apply(data_meth, 2, var) != 0)]
+  pca_prcomp_res <- prcomp(x = data_meth_with_variance,scale=TRUE)
+  
+  pca_summery <- summary(pca_prcomp_res)$importance[2, ]
+  
+  saveRDS(object = pca_prcomp_res, file =  file.path(
+    OUTPUT_FOLDER,
+    paste("pca_prcomp_res", "N_SAMPLES", "37", "rds", sep = ".")
+  ))
+  
+  df_pca <- cbind(meta37, pca_prcomp_res$x)
+  
+  # sex
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC1,
+      y = PC2,
+      label = sample,
+      color = sex
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_1v2 & sex") +
+    theme_minimal() +
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100,1), "%")) +
+    ylab(paste("PC2 : ", round(pca_summery[2] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA", "PCA_1v2_vs_sex_N_SAMPLES_37.png"),
+    width = 8,
+    height = 6
+  )
+  
+  # sex
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC3,
+      y = PC4,
+      label = sample,
+      color = sex
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_3v4 & sex") +
+    theme_minimal() +
+    xlab(paste("PC3 : ", round(pca_summery[3] * 100,1), "%"))+
+    ylab(paste("PC4 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER, "plots","PCA", "PCA_3v4_vs_sex_N_SAMPLES_37.png"),
+    width = 8,
+    height = 6
+  )
+  
+  
+  # locality
+  # p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = Locality))+
+  #   geom_point()+
+  #   ggrepel::geom_text_repel()+
+  #   labs(subtitle="PCA_1v2 & locality")
+  #
+  # ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_locality_N_SAMPLES_37.png"),width=16, height=6)
+  
+  df_pca$old <-  df_pca$age_mean_BP >= 5700
+  
+  
+  ##
+  # "OLD"
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC1,
+      y = PC2,
+      label = sample,
+      color = old
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_1v2 & OLD >= 5700Y") +
+    theme_minimal() +
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100,1), "%")) +
+    ylab(paste("PC2 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ##
+  # "Country"
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC1,
+      y = PC2,
+      label = sample,
+      color = Country
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_1v2 & Country") +
+    theme_minimal() +
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100,1), "%"))+
+    ylab(paste("PC2 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_1v2_vs_Country.png"),
+    width = 10,
+    height = 6
+  )
+  
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC3,
+      y = PC4,
+      label = sample,
+      color = Country
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_3v4 & Country") +
+    theme_minimal() +
+    xlab(paste("PC3 : ", round(pca_summery[3] * 100,1), "%")) +
+    ylab(paste("PC4 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_3v4_vs_Country.png"),
+    width = 10,
+    height = 6
+  )
+  
+  
+  ##
+  # "age"
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC1,
+      y = PC2,
+      label = sample,
+      color = age_mean_BP
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_1v2 & age") +
+    theme_minimal() +
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100,1), "%")) +
+    ylab(paste("PC2 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_1v2_vs_age.png"),
+    width = 10,
+    height = 6
+  )
+  
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC3,
+      y = PC4,
+      label = sample,
+      color = age_mean_BP
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_3v4 & age") +
+    theme_minimal() +
+    xlab(paste("PC3 : ", round(pca_summery[3] * 100,1), "%")) +
+    ylab(paste("PC4 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_3v4_vs_age.png"),
+    width = 10,
+    height = 6
+  )
+  
+  ## Type
+  
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC1,
+      y = PC2,
+      label = sample,
+      color = Type
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_1v2 & Type") +
+    theme_minimal() +
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100,1), "%")) +
+    ylab(paste("PC2 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_1v2_vs_Type.png"),
+    width = 10,
+    height = 6
+  )
+  
+  p_pca <-
+    ggplot(data = df_pca , aes(
+      x = PC3,
+      y = PC4,
+      label = sample,
+      color = Type
+    )) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    labs(subtitle = "PCA_3v4 & Type") +
+    theme_minimal() +
+    xlab(paste("PC3 : ", round(pca_summery[3] * 100,1), "%"))+
+    ylab(paste("PC4 : ", round(pca_summery[4] * 100,1), "%"))
+  
+  ggsave(
+    plot = p_pca,
+    filename = file.path(OUTPUT_FOLDER,"plots","PCA",  "PCA_3v4_vs_Type.png"),
+    width = 10,
+    height = 6
+  )
+}
