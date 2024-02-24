@@ -1261,6 +1261,9 @@ if (Genome_wide_Analysis) {
       }
     }
     
+    df_state_summery$state <-
+      factor(x = df_state_summery$state, levels = state_names)
+    
     saveRDS(object = df_state_summery,
             file = file.path(
       OUTPUT_FOLDER,
@@ -1321,7 +1324,10 @@ if (Genome_wide_Analysis) {
     expected_fraction <- n_H3K27AC_CpG/n_all_CpG
     
     df_summery_by_state$expected <- df_summery_by_state$n_total*expected_fraction 
-    
+
+    df_summery_by_state$state <- factor(x = df_summery_by_state$state,
+                                       levels = state_names)
+        
     saveRDS(object = df_summery_by_state,file = file.path(
       OUTPUT_FOLDER,
       "results",
@@ -1414,22 +1420,22 @@ if (Genome_wide_Analysis) {
       # Extract the p-value from the test results
       p_value_NO_CHIP <- cor_test_NO_CHIP$p.value
       
-      df_summery_by_state$p_value_NO_CHIP[df_summery_by_state$state == state_names[s]] <- p_value_NO_CHIP
+      df_summery_by_state$p_value_NO_CHIP[as.character(df_summery_by_state$state) == state_names[s]] <- p_value_NO_CHIP
 
       # compare H3K37Ac vs no chip 
-      n <- df_summery_by_state$n_H3K27AC[df_summery_by_state$state == state_names[s]]
+      n <- df_summery_by_state$n_H3K27AC[as.character(df_summery_by_state$state) == state_names[s]]
       
       if(n > 3){
         # Perform Pearson correlation test
         cor_test_CHIP <- cor.test(data$age, data$methylation_H3K27AC, method = "pearson")
         # Extract the p-value from the test results
         p_value_CHIP <- cor_test_CHIP$p.value
-        df_summery_by_state$p_value_CHIP[df_summery_by_state$state == state_names[s]] <- p_value_CHIP
+        df_summery_by_state$p_value_CHIP[as.character(df_summery_by_state$state) == state_names[s]] <- p_value_CHIP
       }
       
 
 
-      n1 <- df_summery_by_state$n_total[df_summery_by_state$state == state_names[s]] - df_summery_by_state$n_H3K27AC[df_summery_by_state$state == state_names[s]] 
+      n1 <- df_summery_by_state$n_total[as.character(df_summery_by_state$state) == state_names[s]] - df_summery_by_state$n_H3K27AC[as.character(df_summery_by_state$state) == state_names[s]] 
       
       # Plot scatterplot with trend line
       p1 <- ggplot(data, aes(x = age, y = methylation_NO_CHIP)) +
@@ -1474,6 +1480,71 @@ if (Genome_wide_Analysis) {
       
       
     }
+    
+
+    big_labels <- as.character(df_summery_by_state$state)
+    big_labels[!as.character(df_summery_by_state$state) %in% head(as.character(df_summery_by_state$state)[order(df_summery_by_state$n_H3K27AC, decreasing = TRUE)], 10)] <-
+      " "
+    df_summery_by_state$big_labels <- big_labels
+    
+    # Create the pie chart with borders
+    pie_chart <- ggplot(data = df_summery_by_state, aes(x = 1, y = n_H3K27AC, fill = state)) +
+      geom_bar(width = 1,stat = "identity", color = "black") +  # Add borders to segments
+      coord_polar(theta = "y",start = 0) +  # Convert the bar plot into a pie chart
+      labs(fill = "State",x = NULL) +   # Legend title
+      theme_void() +  # Remove unnecessary elements
+      geomtextpath::geom_textpath(data = df_summery_by_state, position = position_stack(vjust = 0.5),
+                    aes(x = 1.7, y = n_H3K27AC, label = paste0(big_labels)),
+                    size = 4.5, show.legend = FALSE)+
+      theme(        legend.position = "none")
+    
+
+    
+    ggsave(
+      filename = file.path(
+        OUTPUT_FOLDER,
+        "results",
+        "WholeGenome",
+        "plots",
+        paste("pie_chart H3K27Ac", "png", sep = ".")
+      )
+      ,
+      plot = pie_chart,
+      width = 12,
+      height = 12
+    )
+
+}
+
+# state_dependen_analysis --------------------------------------------------------
+if(state_dependen_analysis){
+  
+  # load data 
+  all_CpG_data_hg19 <- readRDS(file = file_name <- file.path(
+    OUTPUT_FOLDER,
+    "results",
+    "WholeGenome",
+    paste("all_data_complete_with_test", "rds", sep = ".")))
+  
+  # Specify the folder path
+  folder_path <- file.path(
+    OUTPUT_FOLDER,
+    "results",
+    "WholeGenome",
+    "analysis_by_state")
+  
+  # Check if the folder exists
+  if (!file.exists(folder_path)) {
+    # If the folder doesn't exist, create it
+    dir.create(folder_path)
+    print(paste("Folder", folder_path, "created successfully."))
+  } else {
+    print(paste("Folder", folder_path, "already exists."))
+  }
+  
+  
+  chromatin_state_names <- levels(all_CpG_data_hg19$state)
+  
 }
 
 # Calculate true Data -----------------------------------------------------------
