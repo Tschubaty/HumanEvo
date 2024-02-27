@@ -52,6 +52,7 @@ library("snow")
 library("parallel")
 # Load the cowplot library
 library(cowplot)
+library(tidyr)
 
 # set constants  ----------------------------------------------------------
 
@@ -406,8 +407,8 @@ create_horizontal_permutated_typisation <- function(typisation) {
 #' @returns number of signifincat pvals
 get_n_significant  <-
   function(df, minus_log_alpha, min_delta) {
-    return(sum(df$p_val < exp(-minus_log_alpha) &
-                 df$delta > min_delta, na.rm = TRUE))
+    return(sum(df$p_val <= exp(-minus_log_alpha) &
+                 df$delta >= min_delta, na.rm = TRUE))
   }
 
 #' counts number of significant values with positive statistic
@@ -420,8 +421,8 @@ get_n_significant  <-
 get_positive_significant  <-
   function(df, minus_log_alpha, min_delta) {
     return(sum(
-      df$p_val < exp(-minus_log_alpha) &
-        df$delta > min_delta &
+      df$p_val <= exp(-minus_log_alpha) &
+        df$delta >= min_delta &
         df$statistic > 0,
       na.rm = TRUE
     ))
@@ -438,18 +439,12 @@ get_positive_significant  <-
 get_negative_significant  <-
   function(df, minus_log_alpha, min_delta) {
     return(sum(
-      df$p_val < exp(-minus_log_alpha) &
-        df$delta > min_delta &
+      df$p_val <= exp(-minus_log_alpha) &
+        df$delta >= min_delta &
         df$statistic < 0,
       na.rm = TRUE
     ))
   }
-
-# parallel_compute_delta_pval_landscape <- function(sim_listfile,
-#                                                   min_deltas = seq(0, 0.50, 0.01),
-#                                                   minus_log_alphas = seq(from = 1, to = 10, by = 0.1)) {
-#   mcmapply
-# }
 
 #' counts significant pval with different alpha and delta cut off
 #' for given p val = exp(-minus_log_alpha) and delta
@@ -462,7 +457,7 @@ get_negative_significant  <-
 parallel_summerize_permutations <-
   function(sim_file_names,
            min_deltas = seq(0, 0.50, 0.01),
-           minus_log_alphas = seq(from = 1, to = 10, by = 0.1)) {
+           minus_log_alphas = seq(from = 0, to = 10, by = 0.1)) {
     sim_results_colnames <-
       c(
         "test",
@@ -796,6 +791,15 @@ if (H3K27ac_Analysis) {
       "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/all_CpG.39.samples.merged.hg19.rds"
     )
   
+  # create results folder 
+  folder_name <- file.path(OUTPUT_FOLDER, "results", "H3K27ac")
+  if (!file.exists(folder_name)) {
+    dir.create(folder_name, recursive = TRUE)
+  }
+  
+  file.path(OUTPUT_FOLDER,
+  "results",
+  "H3K27ac")
   
   all_CpG.meth <-
     all_CpG.39.samples.merged.hg19[, as.character(meta$sample)]
@@ -1074,6 +1078,13 @@ if (Genome_wide_Analysis) {
     readRDS(
       "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/all_CpG.39.samples.merged.hg19.rds"
     )
+  
+  # create results folder 
+  folder_name <- file.path(OUTPUT_FOLDER, "results", "WholeGenome")
+  if (!file.exists(folder_name)) {
+    dir.create(folder_name, recursive = TRUE)
+  }
+  
   
   for (n_chr in 1:length(CHR_NAMES)) {
     # n_chr <- 22
@@ -1526,6 +1537,10 @@ if(state_dependen_analysis){
     "WholeGenome",
     paste("all_data_complete_with_test", "rds", sep = ".")))
   
+  state_names <- unique(as.character(all_CpG_data_hg19$state))
+  state_names <- state_names[order(pad_with_zeros(state_names))]
+  
+
   # Specify the folder path
   folder_path <- file.path(
     OUTPUT_FOLDER,
@@ -1542,9 +1557,177 @@ if(state_dependen_analysis){
     print(paste("Folder", folder_path, "already exists."))
   }
   
+  summery_all_state_results <- data.frame()
   
   chromatin_state_names <- levels(all_CpG_data_hg19$state)
   
+  for (s in 1:length(chromatin_state_names)) {
+    start_time <- Sys.time()
+    state <- chromatin_state_names[s]
+    print(state)
+    df_state <-
+      all_CpG_data_hg19[all_CpG_data_hg19$state == state,]
+    
+    df_state$pearson.p_val[df_state$pearson.delta == 0] <- 1
+    print(paste("# CpG in :", state, nrow(df_state)))
+    saveRDS(object = df_state, file = file.path(folder_path, paste(state, "rds", sep = ".")))
+    
+    pearson.state <-
+      list(
+        sim_typisation = real_age_typisation,
+        permuation_order = state,
+        data = df_state[, c("pearson.p_val", "pearson.statistic", "pearson.delta")]
+      )
+    
+    saveRDS(object = pearson.state, file = file.path(folder_path,
+                                                                  paste("pearson", state, "rds", sep = ".")))
+    
+    file_names <- list.files(path = folder_path,
+                             pattern = paste("^pearson", state, "rds", sep = "."))
+    
+    state_results <-
+      parallel_summerize_permutations(sim_file_names = file.path(folder_path, file_names))
+    
+    
+    saveRDS(object = state_results,
+            file = file.path(
+              folder_path,
+              paste("summery", "pearson", state, "rds", sep = ".")
+            ))
+    
+    max_n <- state_results$n_signfincant_CpG[state_results$min_delta == 0 &
+                                               state_results$minus_log_alpha == 0]
+    state_results$fraction_negative_signfincant_CpG <-
+      state_results$negative_signfincant_CpG / max_n
+    state_results$fraction_positive_signfincant_CpG <-
+      state_results$positive_signfincant_CpG / max_n 
+    state_results$fraction_signfincant_CpG <-
+      state_results$n_signfincant_CpG / max_n 
+    # Convert to long format
+    state_results_long <-
+      pivot_longer(
+        data = state_results,
+        cols = c(
+          fraction_negative_signfincant_CpG,
+          fraction_positive_signfincant_CpG
+        ),
+        names_to = "slope",
+        values_to = "fraction_direction_signfincant"
+      )
+    
+    summery_all_state_results <-
+      rbind(summery_all_state_results, state_results_long)
+    
+    end_time <- Sys.time()
+    print(end_time - start_time)
+  }
+  saveRDS(object = summery_all_state_results,
+          file = file.path(
+            folder_path,
+            paste("summery", "pearson", "all","states", "rds", sep = ".")
+          ))
+  
+  
+  
+  summery_all_state_results_wide <- pivot_wider(
+    data = summery_all_state_results,
+    names_from = slope,
+    values_from = fraction_direction_signfincant
+  )
+  
+  dummy_value <- 1
+  summery_all_state_results_wide$negative_enrichment <- (summery_all_state_results_wide$negative_signfincant_CpG)/(dummy_value + summery_all_state_results_wide$positive_signfincant_CpG)
+  
+  alpha <- 8
+  min_delta <- 0.3
+  ggplot(
+    data =  summery_all_state_results_wide[ summery_all_state_results_wide$min_delta == min_delta & 
+                                              summery_all_state_results_wide$minus_log_alpha >= 6, ],
+    mapping = aes(x = minus_log_alpha, 
+                  y = negative_enrichment,
+                  color = permuation_type))+
+    geom_point(position = "jitter")+
+    theme(legend.position = "none")
+  
+  
+  slice_0 <-
+    summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
+                                     summery_all_state_results_wide$minus_log_alpha == 0, ]
+  
+  slice_alpha <-
+    summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
+                                     summery_all_state_results_wide$minus_log_alpha == alpha, ]
+  
+  slice_alpha$percent_negative_significant <- slice_alpha$negative_signfincant_CpG/slice_0$negative_signfincant_CpG
+  slice_alpha$percent_positive_significant <- slice_alpha$positive_signfincant_CpG/slice_0$positive_signfincant_CpG
+  
+  slice_alpha_long <- pivot_longer(slice_alpha, cols = c(percent_negative_significant, percent_positive_significant), names_to = "slope", values_to = "percent_significant")
+  slice_alpha_long$permuation_type <-   factor(x = slice_alpha_long$permuation_type,
+                                               levels = state_names)
+  p <- ggplot(
+    data = slice_alpha_long,
+    mapping = aes(x = permuation_type, y = percent_significant, fill = slope)
+  ) +
+    geom_bar(stat = "identity", position = "dodge") +
+    ggplot2::theme(
+      #axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
+      #legend.position = "none",
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
+    ) +
+    geom_hline(
+      yintercept = exp(-alpha),
+      linetype = "dashed",
+      color = "red"
+    ) +  # Add horizontal line exp(-alpha)
+    annotate(
+      geom = "text",
+      x = tail(as.factor(unique(slice_alpha_long$permuation_type)))[1],
+      y = exp(-alpha),
+      label = expression(e^(-alpha)),
+      hjust = -2,
+      vjust = 0.5,
+      color = "red"
+    )+
+    coord_cartesian(clip = "off")+
+    ylab(expression(paste("fraction of significant CpG ", p[value] <= e^(-8), ", ", delta[meth] >= 0.3)))+
+    xlab("chromatin state labeling")
+  
+  ggsave(
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      "plots",
+      paste("delta",min_delta,"alpha",alpha, "png", sep = ".")
+    ),
+    plot = p,
+    width = 12,
+    height = 6
+  )
+  
+  
+  min_delta <- 0.30
+  #all_CpG_data_hg19[all_CpG_data_hg19$pearson.delta >=]
+  
+
+  ggplot(
+    data = summery_all_state_results[summery_all_state_results$min_delta == min_delta & 
+                                       summery_all_state_results$minus_log_alpha >= 6, ],
+    mapping = aes(x = as.character(minus_log_alpha), 
+                  y = fraction_direction_signfincant,
+                  color = interaction(permuation_type, slope)))+
+    geom_point(position = "jitter")+
+    theme(legend.position = "none")
+  
+  slice <- summery_all_state_results[summery_all_state_results$min_delta == min_delta & 
+                              summery_all_state_results$minus_log_alpha == alpha,]
+  slice[order(slice$fraction_direction_signfincant,decreasing = TRUE),c("permuation_type","slope","fraction_direction_signfincant")]
+
 }
 
 # Calculate true Data -----------------------------------------------------------
@@ -1613,7 +1796,6 @@ if (create_true_stat) {
   df_peak_CpG_complete_with_test <-
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
 }
-
 
 # describe Data ---------------------------------------------------------------
 if (describe_Data) {
@@ -1897,7 +2079,7 @@ if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
   dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 50
+  n_repetitions <- 48
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -2538,7 +2720,7 @@ if (summerize_horizonal_columns_permutations) {
   
   saveRDS(
     object = sim_results,
-    file = file.path(OUTPUT_FOLDER, "horizontal.sim_results2024.rds")
+    file = file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds")
   )
 }
 
