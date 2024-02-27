@@ -533,6 +533,10 @@ parallel_summerize_permutations <-
                              
                              colnames(sim) <-
                                c("p_val", "statistic", "delta")
+                             
+                             # set pval to 1 if no changes in methylation 
+                             sim$p_val[sim$delta == 0] <- 1
+                             
                              temp_sim$n_signfincant_CpG <-
                                mapply(
                                  minus_log_alpha = temp_sim$minus_log_alpha,
@@ -561,6 +565,7 @@ parallel_summerize_permutations <-
                              return(temp_sim)
                            }
     parallel::stopCluster(cl = my.cluster)
+    
     return(sim_results)
   }
 
@@ -2095,6 +2100,7 @@ if (create_permutations_horizonal_columns) {
     
     permutation_age$data <-
       parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test, age.typisation = sim_age_typisation)
+    
     permutation_food$data <-
       parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test, food.typisation = sim_food_typisation)
     
@@ -2825,10 +2831,8 @@ if (aggregate_horizontal_results) {
   real_results <-
     readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
   sim_results <-
-    readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results2.rds"))
-  sim_results <-
-    readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results2024.rds"))
-  
+    readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds"))
+
   #sim_results <- readRDS(file = file.path(OUTPUT_FOLDER,"CpG_permutation.sim_results.rds"))
   
   
@@ -2848,11 +2852,13 @@ if (aggregate_horizontal_results) {
     ),]
   
   
-  real_results_test <- real_results[test ==  real_results$test, ]
+  #real_results_test <- real_results[test ==  real_results$test, ]
+  #ggplot(data = real_results_test[real_results_test$min_delta == 0.3,],mapping = aes(x = minus_log_alpha,y = n_signfincant_CpG))+geom_point()
   
   df_empirical_means$real_count <-
-    real_results_test$n_signfincant_CpG[order(real_results_test$min_delta,
-                                              real_results_test$minus_log_alpha)]
+    real_results$n_signfincant_CpG[order(real_results$min_delta,
+                                              real_results$minus_log_alpha,
+                                              real_results$test)]
   
   df_empirical_means$FDR <-
     df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
@@ -2961,8 +2967,8 @@ if (plot_kw_landscape) {
 }
 # plot pearson landscape --------------------------------------------------
 if (pearson_landscape) {
-  min_alpha <- 6
-  max_alpha <- 10 # 8.5
+  min_alpha <- 6.5
+  max_alpha <- 8.5
   min_delta <- 0.2
   test <- "pearson"
   min_real_count <- 1
@@ -2973,6 +2979,14 @@ if (pearson_landscape) {
                          df_empirical_means$min_delta > min_delta &
                          df_empirical_means$test == test &
                          min_real_count <= df_empirical_means$real_count,]
+  
+  # debug
+  #
+  # debug_df <-
+  #   df_empirical_means[  df_empirical_means$min_delta == 0.3 &
+  #                        df_empirical_means$test == test,]
+  #
+  #ggplot(data = debug_df,mapping = aes(x = minus_log_alpha,y = real_count))+geom_point()
   
   plotly::plot_ly(
     search_df ,
