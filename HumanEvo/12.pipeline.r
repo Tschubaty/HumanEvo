@@ -2436,6 +2436,8 @@ if (create_true_stat) {
 }
 # describe LOCUS ---------------------------------------------------------------
 if(FALSE){
+  # all_CpG_data_hg19 <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_data_complete_with_test.rds")
+  
   GH <- list(ID = "GH05J143394",chr = "chr5", start =142774324, end = 142785910)
   Gene <- "NR3C1"
   H3K27ac <- "chr5.142784176.142785514.H3K27ac"
@@ -2485,6 +2487,41 @@ if(FALSE){
   
   ggsave(plot = p,filename = file.path(OUTPUT_FOLDER,"results","pearson",paste(Gene,GH$ID,"png",sep = ".")))
   
+  # https://clinicalepigeneticsjournal.biomedcentral.com/articles/10.1186/s13148-019-0680-7/tables/2
+  DMR <- list(ID = "ENO2",chr = "chr12", start =7023752, end = 7024121)
+  DMR <- list(ID = "ZNF226",chr = "chr19", start =44669146, end = 44669354)
+  DMR <- list(ID = "CCDC51/TMA7",chr = "chr3", start =48481268, end = 48481793)
+  
+  df <- all_CpG_data_hg19[all_CpG_data_hg19$chrom == DMR$chr &  
+                            DMR$start - 1000 <= all_CpG_data_hg19$start &
+                            all_CpG_data_hg19$end <= DMR$end + 1000,]
+  
+  xmin <- DMR$start - 1000
+  xmax <- DMR$end + 1000
+  
+  unique(df$name)
+  
+  p <- ggplot(data = df,mapping = aes(x = start,y = -log(pearson.p_val)))+
+    geom_rect(aes(xmin = max(GH$start,xmin), xmax = min(xmax,GH$end), ymin = -1, ymax = -0.5), fill = "yellow", alpha = 0.9)+
+    # geom_segment(aes(x = xmax, y = -0.7, xend = xmax + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
+    # geom_segment(aes(x = xmin, y = -0.7, xend = xmin + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
+    geom_rect(aes(xmin = 48481218, xmax = 48482176, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
+    #geom_rect(aes(xmin = 142784176, xmax = 142785514, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
+    geom_bar(stat = "identity")+
+    #geom_text(aes(x = (xmin + xmax) / 2, y = -0.75, label = GH$ID), color = "black") +
+    #geom_text(aes(x = (142782230 + 142783990) / 2, y = -0.3, label = "H3K27Ac"), color = "black") +
+    #geom_text(aes(x = (142784176 + 142785514) / 2, y = -0.3, label = "H3K27Ac"), color = "black")+
+    #geom_bar(data = df[which.min(df$pearson.p_val),],stat = "identity",color = "red")+
+    ylab(expression(-log(pearson_p[value])))+
+    xlab(paste(DMR$chr,": Genomic position hg19"))+
+    xlim(c(xmin,xmax))+
+    theme_minimal()+
+    # geom_rect(aes(xmin = loc1$start, xmax = loc1$end, ymin = -1.5, ymax = -1.4), fill = "green", alpha = 0.9)+
+    # geom_rect(aes(xmin = loc2$start, xmax = loc2$end, ymin = -1.4, ymax = -1.3), fill = "green", alpha = 0.9)+
+    # geom_rect(aes(xmin = loc3$start, xmax = loc3$end, ymin = -1.3, ymax = -1.2), fill = "green", alpha = 0.9)+
+    # geom_rect(aes(xmin = loc4$start, xmax = loc4$end, ymin = -1.2, ymax = -1.1), fill = "green", alpha = 0.9)+
+    # geom_rect(aes(xmin = loc5$start, xmax = loc5$end, ymin = -1.1, ymax = -1.0), fill = "green", alpha = 0.9)+
+    coord_cartesian(expand = c(0, 0))
   
 }
 
@@ -3541,7 +3578,7 @@ if (aggregate_CpG_results) {
 }
 # aggregate horizontal results -------------------------------------------------------
 if (aggregate_horizontal_results) {
-  test <- "KW"
+  test <- "pearson"
   real_results <-
     readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
   # sim_results <-
@@ -3592,9 +3629,9 @@ if (aggregate_horizontal_results) {
     file = file.path(OUTPUT_FOLDER, paste(test,"df_horizontal_column_empirical_means.rds",sep = "."))
   )
 }
-# plot kw landscape -------------------------------------------------------
+# plot landscape -------------------------------------------------------
 if (plot_landscape) {
-  min_alpha <- 6
+  min_alpha <- 6.5
   max_alpha <- 9.9
   min_delta <- 0.2
   test <- "KW"
