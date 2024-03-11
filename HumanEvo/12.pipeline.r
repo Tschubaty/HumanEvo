@@ -53,8 +53,14 @@ library("parallel")
 # Load the cowplot library
 library(cowplot)
 library(tidyr)
+library(dplyr)
 
 # set constants  ----------------------------------------------------------
+
+gg_color_hue <- function(n) {
+  hues = seq(15, 375, length = n + 1)
+  hcl(h = hues, l = 65, c = 100)[1:n]
+}
 
 #supplemntary material https://genomebiology.biomedcentral.com/articles/10.1186/s13059-021-02572-z
 df_universal_annotation <-
@@ -78,13 +84,21 @@ df_universal_annotation$color[df_universal_annotation$color == "light puple"] <-
   "#8A91D0"
 df_universal_annotation$color[df_universal_annotation$color == "silver"] <-
   "#808080"
-df_universal_annotation$color[df_state_summery$state_group == "weak transcription"] <-
+df_universal_annotation$color[df_universal_annotation$Group == "weak transcription"] <-
   "#009600"
-df_universal_annotation$color[df_state_summery$state_group == "transcription"] <-
+df_universal_annotation$color[df_universal_annotation$Group == "transcription"] <-
   "#008000"
 
-# matching_indices <- match(df_state_summery$state,paste(df_universal_annotation$state_order_by_group,df_universal_annotation$`States  presented in paper`,sep = "_"))
-# df_state_summery$state_color <- df_universal_annotation$color[matching_indices]
+state_names <-
+  paste(
+    df_universal_annotation$state_order_by_group,
+    df_universal_annotation$`States  presented in paper`,
+    sep = "_"
+  )
+
+
+# matching_indices <- match(df_state_sample$state,paste(df_universal_annotation$state_order_by_group,df_universal_annotation$`States  presented in paper`,sep = "_"))
+# df_state_sample$state_color <- df_universal_annotation$color[matching_indices]
 
 #  "white"
 # "light puple"
@@ -102,8 +116,11 @@ df_universal_annotation$color[df_state_summery$state_group == "transcription"] <
 # "#ff4500"
 # "red"
 
+## only big sample groups
+TYPES <- c("Farmer", "Steppe", "HG")
+
 meta <- as.data.frame(readxl::read_xlsx("AGDP.39.metadata2.xlsx"))
-meta <- meta[order(meta$age_mean_BP),]
+meta <- meta[order(meta$age_mean_BP), ]
 meta$sample <- factor(x = meta$sample, levels = meta$sample)
 
 real_age_typisation <-
@@ -111,8 +128,16 @@ real_age_typisation <-
 real_food_typisation <-
   meta[meta$Type %in% TYPES, c("sample", "Type")]
 
-## only big sample groups
-TYPES <- c("Farmer", "Steppe", "HG")
+# Compute the mean of age_mean_BP by Type
+mean_age_by_type <-
+  aggregate(meta$age_mean_BP,
+            by = list(Type = meta$Type),
+            FUN = mean)
+# Rename the columns for clarity
+colnames(mean_age_by_type) <- c("Type", "Mean_age_mean_BP")
+mean_age_by_type <-
+  mean_age_by_type[order(mean_age_by_type$Mean_age_mean_BP), ]
+mean_age_by_type$color <- gg_color_hue(nrow(mean_age_by_type))
 
 OUTPUT_FOLDER <- "12.pipeline"
 dir.create(OUTPUT_FOLDER, showWarnings = FALSE)
@@ -223,7 +248,8 @@ delta_mean_type <- function(df_row, typisation) {
 meth_vs_type_test <- function(df_row, typisation) {
   typisation$meth <- NA
   for (s in unique(typisation$Type)) {
-    meth <- as.numeric(df_row[as.character(typisation$sample[typisation$Type == s])])
+    meth <-
+      as.numeric(df_row[as.character(typisation$sample[typisation$Type == s])])
     # test prerequisite if at least 5 samples
     if (sum(!is.na(meth)) < 5) {
       return(NA)
@@ -776,7 +802,7 @@ create_CpG_permution <- function(df, typisation) {
     permuation_order[[as.character(typisation$sample[i])]] <-
       permuation
   }
-  df <- df[,!colnames(df) %in%
+  df <- df[, !colnames(df) %in%
              c(pearson_test_colnames, KW_test_colnames)]
   return(list(data = df, permuation_order = permuation_order))
 }
@@ -802,7 +828,7 @@ plot_age_correlation <- function(df_row, typisation) {
     xlim(0, 11500) +
     xlab("sample age estimation in Years before Present") +
     ylab("CpG methylation") +
-    geom_smooth(method = "lm", ) +
+    geom_smooth(method = "lm",) +
     theme_minimal()
   
   
@@ -963,8 +989,8 @@ if (H3K27ac_Analysis) {
     factor(df_universal_annotation$color[matching_indices],
            levels = unique(df_universal_annotation$color))
   all_CpG_states_hg19$state_group <-
-    factor(df_state_summery$state_group[matching_indices],
-           levels = unique(df_state_summery$state_group))
+    factor(df_state_sample$state_group[matching_indices],
+           levels = unique(df_state_sample$state_group))
   all_CpG_states_hg19$state <-
     factor(x = all_CpG_states_hg19$state, levels = state_names)
   
@@ -1122,8 +1148,16 @@ if (H3K27ac_Analysis) {
   #   ylab("% of CpGs covered by H3K27ac peaks in bone sample") +
   #   xlab("genome segment chromatin state labeling")
   
-  p <- ggplot(data = df_summery_by_state,mapping = aes(x = state,y = n_H3K27AC/n_total*100, fill = state_group))+
-           geom_bar(stat = "identity",color = "black")+
+  p <-
+    ggplot(
+      data = df_state,
+      mapping = aes(
+        x = state,
+        y = n_H3K27AC / n_total * 100,
+        fill = state_group
+      )
+    ) +
+    geom_bar(stat = "identity", color = "black") +
     ggplot2::theme(
       axis.line = ggplot2::element_line(colour = "black"),
       panel.background = ggplot2::element_blank(),
@@ -1133,11 +1167,11 @@ if (H3K27ac_Analysis) {
         vjust = 0.5,
         hjust = 1
       )
-    )+
+    ) +
     ylim(0, 100) +
     ylab("% of CpGs in genome covered by H3K27ac") +
-    xlab("state group")+
-    scale_fill_manual(values = unique(as.character(df_summery_by_state$state_color)))
+    xlab("state group") +
+    scale_fill_manual(values = unique(as.character(df_state$state_color)))
   
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
@@ -1192,7 +1226,7 @@ if (Genome_wide_Analysis) {
     
     # cut out only coordinates per chromosome
     df_chr <-
-      all_CpG.39.samples.merged.hg19[all_CpG.39.samples.merged.hg19$chrom == CHR_NAMES[n_chr],]
+      all_CpG.39.samples.merged.hg19[all_CpG.39.samples.merged.hg19$chrom == CHR_NAMES[n_chr], ]
     
     # compute sample numbers per CpG position
     start_time <- Sys.time()
@@ -1212,7 +1246,7 @@ if (Genome_wide_Analysis) {
     
     # discard CpG with not full data
     df_chr_complete <-
-      df_chr[nrow(real_age_typisation) == df_chr$score,]
+      df_chr[nrow(real_age_typisation) == df_chr$score, ]
     
     # compute real data value kruskall_valis
     start_time <- Sys.time()
@@ -1252,10 +1286,10 @@ if (Genome_wide_Analysis) {
   }
   
 }
-# all CpGs dataframe -all_CpG_data_hg19 -all_data_complete_with_test -----------------------------------------------------------------------
+# all_CpG_complete_with_test -all_CpG_complete_with_test -----------------------------------------------------------------------
 if (FALSE) {
   # compine all chr data to big df
-  all_CpG_data_hg19 <- data.frame()
+  all_CpG_complete_with_test <- data.frame()
   for (n_chr in 1:length(CHR_NAMES)) {
     print(n_chr)
     file_name <- file.path(
@@ -1265,60 +1299,443 @@ if (FALSE) {
       paste(CHR_NAMES[n_chr], "_complete_with_test", "rds", sep = ".")
     )
     df_chr <- readRDS(file = file_name)
-    all_CpG_data_hg19 <- rbind(all_CpG_data_hg19, df_chr)
+    all_CpG_complete_with_test <-
+      rbind(all_CpG_complete_with_test, df_chr)
   }
   
-  state_names <- unique(as.character(all_CpG_data_hg19$state))
-  state_names <- state_names[order(pad_with_zeros(state_names))]
-  
-  all_CpG_data_hg19$state <- factor(x = all_CpG_data_hg19$state,
-                                    levels = state_names)
+  all_CpG_complete_with_test$state <-
+    factor(x = all_CpG_complete_with_test$state,
+           levels = state_names)
   
   matching_indices <-
+    match(all_CpG_complete_with_test$state,
+          state_names)
+  all_CpG_complete_with_test$state_color <-
+    factor(df_universal_annotation$color[matching_indices],
+           levels = unique(df_universal_annotation$color))
+  all_CpG_complete_with_test$state_group <-
+    factor(df_universal_annotation$Group[matching_indices],
+           levels = unique(df_universal_annotation$Group))
+  
+  saveRDS(
+    object = all_CpG_complete_with_test,
+    file =  file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test", "rds", sep = ".")
+    )
+  )
+}
+# df_state_sample  -----------------------------------------------------------------------
+if (FALSE) {
+  #df_state_sample <- summary_df <- aggregate(. ~ state, data =  all_CpG_complete_with_test[,c("state",as.character(meta$sample))], FUN = mean)
+  state_summery_column_names <-
+    c(
+      "state",
+      "sample",
+      "mean_methylation",
+      "sd_methylation",
+      "methylation_H3K27AC",
+      "methylation_NO_CHIP"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state_sample <-
+    data.frame(matrix(
+      NA,
+      nrow = length(state_names) * nrow(meta),
+      ncol = length(state_summery_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_sample) <- state_summery_column_names
+  
+  r <- 1
+  for (state in  state_names) {
+    print(state)
+    for (sample in as.character(meta$sample)) {
+      df_state_sample$state[r] <- state
+      df_state_sample$sample[r] <- sample
+      
+      index <- all_CpG_complete_with_test$state == state
+      meth_column <- all_CpG_complete_with_test[, sample]
+      meth <- meth_column[index]
+      
+      df_state_sample$mean_methylation[r] <- mean(meth)
+      df_state_sample$sd_methylation[r] <- sd(meth)
+      
+      df_state_sample$methylation_H3K27AC[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test$name != "NO_CHIP"])
+      df_state_sample$methylation_NO_CHIP[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test$name == "NO_CHIP"])
+      
+      r <- r + 1
+    }
+  }
+  
+  # change state to factor
+  df_state_sample$state <-
+    factor(x = df_state_sample$state, levels = state_names)
+  
+  # annotate states
+  matching_indices <-
     match(
-      all_CpG_data_hg19$state,
+      df_state_sample$state,
       paste(
         df_universal_annotation$state_order_by_group,
         df_universal_annotation$`States  presented in paper`,
         sep = "_"
       )
     )
-  all_CpG_data_hg19$state_color <-
-    factor(df_universal_annotation$color[matching_indices],
-           levels = unique(df_universal_annotation$color))
-  all_CpG_data_hg19$state_group <-
-    factor(df_state_summery$state_group[matching_indices],
-           levels = unique(df_state_summery$state_group))
+  df_state_sample$state_color <-
+    df_universal_annotation$color[matching_indices]
+  df_state_sample$state_group <-
+    factor(df_universal_annotation$Group[matching_indices],
+           levels = unique(df_universal_annotation$Group))
+  # annotate type
+  matching_indices <- match(df_state_sample$sample, meta$sample)
+  df_state_sample$type <- meta$Type[matching_indices]
+  
+  # match color
+  matching_indices <-
+    match(df_state_sample$type, mean_age_by_type$Type)
+  df_state_sample$type_color <-
+    mean_age_by_type$color[matching_indices]
+  df_state_sample$type <-
+    factor(x = df_state_sample$type , levels = mean_age_by_type$Type)
   
   saveRDS(
-    object = all_CpG_data_hg19,
-    file =  file.path(
+    object = df_state_sample,
+    file = file.path(
       OUTPUT_FOLDER,
       "results",
       "WholeGenome",
-      paste("all_data_complete_with_test", "rds", sep = ".")
+      paste("df_state_sample", "rds", sep = ".")
     )
   )
+}
+# df_state_group_sample  -----------------------------------------------------------------------
+if (FALSE) {
+  state_group_sample_summery_column_names <-
+    c(
+      "state_group",
+      "sample",
+      "mean_methylation",
+      "sd_methylation",
+      "methylation_H3K27AC",
+      "methylation_NO_CHIP"
+    )
   
-  # all_CpG_data_hg19 <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_data_complete_with_test.rds")
-  # state_names <- unique(as.character(all_CpG_data_hg19$state))
-  # state_names <- state_names[order(pad_with_zeros(state_names))]
-  # df_state_summery <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/df_state_summery.rds")
-  # df_summery_by_state <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/df_summery_by_state.rds")
+  # Create an empty data frame with the specified column names
+  df_state_group_sample <-
+    data.frame(matrix(
+      NA,
+      nrow = length(unique(df_universal_annotation$Group)) * nrow(meta),
+      ncol = length(state_group_sample_summery_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_group_sample) <- state_group_sample_summery_column_names
+  
+  r <- 1
+  for (sg in unique(df_universal_annotation$Group)) {
+    print(sg)
+    for (sample in as.character(meta$sample)) {
+      print(sample)
+      df_state_group_sample$state_group[r] <- sg
+      df_state_group_sample$sample[r] <- sample
+      
+      index <- all_CpG_complete_with_test$state_group == sg
+      meth_column <- all_CpG_complete_with_test[, sample]
+      meth <- meth_column[index]
+      
+      df_state_group_sample$mean_methylation[r] <- mean(meth)
+      df_state_group_sample$sd_methylation[r] <- sd(meth)
+      
+      df_state_group_sample$methylation_H3K27AC[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test$name != "NO_CHIP"])
+      df_state_group_sample$methylation_NO_CHIP[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test$name == "NO_CHIP"])
+      
+      r <- r + 1
+    }
+  }
+  
+  # change state to factor
+  df_state_group_sample$state_group <-
+    factor(x = df_state_group_sample$state_group, levels = unique(df_universal_annotation$Group))
+  
+  # annotate states
+  matching_indices <-
+    match(
+      df_state_group_sample$state_group,
+      unique(df_universal_annotation$Group)
+    )
+  df_state_group_sample$state_group_color <-
+    df_universal_annotation$color[matching_indices]
+ 
+  # annotate type
+  matching_indices <- match(df_state_group_sample$sample, meta$sample)
+  df_state_group_sample$type <- meta$Type[matching_indices]
+  
+  # match color
+  matching_indices <-
+    match(df_state_group_sample$type, mean_age_by_type$Type)
+  df_state_group_sample$type_color <-
+    mean_age_by_type$color[matching_indices]
+  df_state_group_sample$type <-
+    factor(x = df_state_group_sample$type , levels = mean_age_by_type$Type)
+  
+  saveRDS(
+    object = df_state_group_sample,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state_group_sample", "rds", sep = ".")
+    )
+  )
+}
+# df_state  -----------------------------------------------------------------------
+if (FALSE) {
+  state_column_names <-
+    c(
+      "state",
+      "mean_methylation",
+      "sd_methylation",
+      "mean_delta",
+      "sd_delta",
+      "mean_minus_log_p",
+      "sd_minus_log_p",
+      "n_total",
+      "n_H3K27AC"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state <-
+    data.frame(matrix(
+      NA,
+      nrow = length(state_names),
+      ncol = length(state_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state) <- state_column_names
+  
+  r <- 1
+  for (state in  state_names) {
+    print(state)
+    
+    df_state$state[r] <- state
+    
+    index <- all_CpG_complete_with_test$state == state
+    meth <-
+      all_CpG_complete_with_test[index, as.character(meta$sample)]
+    df_state$mean_delta[r] <-
+      mean(all_CpG_complete_with_test$pearson.delta[index])
+    df_state$sd_delta[r] <-
+      sd(all_CpG_complete_with_test$pearson.delta[index])
+    df_state$mean_minus_log_p[r] <-
+      mean(-log(all_CpG_complete_with_test$pearson.p_val[index]), na.rm = TRUE)
+    df_state$sd_minus_log_p[r] <-
+      sd(-log(all_CpG_complete_with_test$pearson.p_val[index]), na.rm = TRUE)
+    df_state$mean_methylation[r] <-
+      mean(as.matrix(meth))
+    df_state$sd_methylation[r] <-
+      sd(as.matrix(meth))
+    df_state$n_total[r] <- sum(index)
+    df_state$n_H3K27AC[r] <-
+      sum(index & all_CpG_complete_with_test$name != "NO_CHIP")
+    r <- r + 1
+  }
+  
+  n_all_CpG <- sum(df_state$n_total)
+  n_H3K27AC_CpG <- sum(df_state$n_H3K27AC)
+  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
+  
+  df_state$expected <-
+    df_state$n_total * expected_fraction
+  
+  df_state$state <-
+    factor(x = df_state$state,
+           levels = state_names)
+  
+  
+  matching_indices <-
+    match(
+      df_state$state,
+      paste(
+        df_universal_annotation$state_order_by_group,
+        df_universal_annotation$`States  presented in paper`,
+        sep = "_"
+      )
+    )
+  df_state$state <-
+    factor(df_state$state, levels = df_state$state)
+  df_state$state_color <-
+    factor(df_universal_annotation$color[matching_indices],
+           levels = unique(df_universal_annotation$color))
+  df_state$state_group <-
+    factor(df_state_sample$state_group[matching_indices],
+           levels = unique(df_state_sample$state_group))
+  
+  df_state$p_val_test_all_methylation_KW <- NA
+  
+  for (st in state_names) {
+    print(st)
+    meth <-
+      data.table::setDT(all_CpG_complete_with_test[all_CpG_complete_with_test$state == st, as.character(meta$sample)])
+    meth <-
+      data.table::melt(
+        data = meth,
+        id.vars = NULL,
+        variable.name = "sample",
+        value.name = "methylation"
+      )
+    # # Perform Kruskal-Wallis test
+    kw_state <- kruskal.test(methylation ~ sample, data = meth)
+    df_state$p_val_test_all_methylation_KW[df_state$state == st] <-
+      format.pval(kw_state$p.value, digits = 3)
+  }
+  
+  saveRDS(
+    object = df_state,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state", "rds", sep = ".")
+    )
+  )
+}
+# df_state_group  -----------------------------------------------------------------------
+if (FALSE) {
+  state_group_column_names <-
+    c(
+      "state_group",
+      "mean_methylation",
+      "sd_methylation",
+      "mean_delta",
+      "sd_delta",
+      "mean_minus_log_p",
+      "sd_minus_log_p",
+      "n_total",
+      "n_H3K27AC"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state_group <-
+    data.frame(matrix(
+      NA,
+      nrow = length(unique(df_universal_annotation$Group)),
+      ncol = length(state_group_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_group) <- state_group_column_names
+  
+  r <- 1
+  for (sg in  unique(df_universal_annotation$Group)) {
+    print(sg)
+    
+    df_state_group$state_group[r] <- sg
+
+    index <- all_CpG_complete_with_test$state_group == sg
+    meth <-
+      all_CpG_complete_with_test[index, as.character(meta$sample)]
+    
+    df_state_group$mean_delta[r] <-
+      mean(all_CpG_complete_with_test$pearson.delta[index])
+    df_state_group$sd_delta[r] <-
+      sd(all_CpG_complete_with_test$pearson.delta[index])
+    df_state_group$mean_minus_log_p[r] <-
+      mean(-log(all_CpG_complete_with_test$pearson.p_val[index]), na.rm = TRUE)
+    df_state_group$sd_minus_log_p[r] <-
+      sd(-log(all_CpG_complete_with_test$pearson.p_val[index]), na.rm = TRUE)
+    df_state_group$mean_methylation[r] <-
+      mean(as.matrix(meth))
+    df_state_group$sd_methylation[r] <-
+      sd(as.matrix(meth))
+    df_state_group$n_total[r] <- sum(index)
+    df_state_group$n_H3K27AC[r] <-
+      sum(index & all_CpG_complete_with_test$name != "NO_CHIP")
+    r <- r + 1
+  }
+
+  n_all_CpG <- sum(df_state_group$n_total)
+  n_H3K27AC_CpG <- sum(df_state_group$n_H3K27AC)
+  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
+  
+  df_state_group$expected_n_H3K27AC <-
+    df_state_group$n_total * expected_fraction
+  
+ saveRDS(
+    object = df_state_group,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state_group", "rds", sep = ".")
+    )
+  )
+}
+
+# make_plots  -----------------------------------------------------------------------
+if (FALSE) {
+  # all_CpG_complete_with_test <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds")
+  # df_state_sample <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/df_state_sample.rds")
+  # df_state <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/df_state.rds")
   
   # # Convert your dataframe to a data.table
   #
   #
   # # Melt the dataframe
   # all_CpG_meth <- data.table::melt(data = meth, id.vars = NULL, variable.name = "sample", value.name = "methylation")
-  #
   
   
+  library(grid)
+# create rectanlges 
+    muh_grob <- grid::rectGrob(
+    x=1:(length(unique(df_universal_annotation$Group))-1), y=0, gp=gpar(
+      color='black', fill=unique(df_universal_annotation$color)[-1], alpha=0.2))
+  
+
+  p <- ggplot(data = df_state_group_sample[! as.character(df_state_group_sample$state_group) == "others", ],
+         mapping = aes(x = state_group,y = mean_methylation,color = type))+
+    geom_point(position = "jitter",size = 1)+
+    theme_classic()+
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      ))+
+    coord_cartesian(clip='off')+
+    annotation_custom(
+      grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.16, ymax=0.15
+    )+
+    labs(x=NULL,y="mean sample methylation")+
+    scale_color_discrete(name = "lifestyle/diet")+
+    theme(
+      text = element_text(size = 14)  # Adjust size as needed
+    )
+  
+  ggsave(filename = file.path(
+    OUTPUT_FOLDER,
+    "results",
+    "WholeGenome",
+    paste("mean_methylation_per_in_group", "png", sep = ".")
+  ),plot = p,width = 8,height = 8)
   
   df_plot_no_arf <-
-    all_CpG_data_hg19[!grepl(pattern = "GapArtf",
-                             x = all_CpG_data_hg19$state,
-                             ignore.case = TRUE),]
+    all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
+                                      x = all_CpG_complete_with_test$state,
+                                      ignore.case = TRUE), ]
   print(dim(df_plot_no_arf))
   
   # plot delta
@@ -1414,6 +1831,29 @@ if (FALSE) {
     ylim(0, 5) +
     scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   
+  
+  ggplot(data = df_plot_no_arf,
+         mapping = aes(
+           x = state_group,
+           y = -log(pearson.p_val),
+           fill = state_group
+         )) +
+    geom_violin() +
+    ggplot2::theme(
+      #axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
+    ) +
+    ylab(bquote(""  ~ -log(p_[value]))) +
+    xlab("chromatin state labeling") +
+    ylim(0, 5) +
+    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
+  
   # ggsave(filename = file.path(
   #   OUTPUT_FOLDER,
   #   "results",
@@ -1421,96 +1861,13 @@ if (FALSE) {
   #   paste("methylation_WG_complete_with_test", "png", sep = "."))
   #   ,plot = p,width = 36,height = 12)
   
-  #df_state_summery <- summary_df <- aggregate(. ~ state, data =  all_CpG_data_hg19[,c("state",as.character(meta$sample))], FUN = mean)
-  state_summery_column_names <-
-    c(
-      "state",
-      "sample",
-      "mean_methylation",
-      "sd_methylation",
-      "methylation_H3K27AC",
-      "methylation_NO_CHIP"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_state_summery <-
-    data.frame(matrix(
-      NA,
-      nrow = length(state_names) * nrow(meta),
-      ncol = length(state_summery_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_state_summery) <- state_summery_column_names
-  
-  r <- 1
-  for (state in  state_names) {
-    print(state)
-    for (sample in as.character(meta$sample)) {
-      df_state_summery$state[r] <- state
-      df_state_summery$sample[r] <- sample
-      
-      index <- all_CpG_data_hg19$state == state
-      meth_column <- all_CpG_data_hg19[, sample]
-      meth <- meth_column[index]
-      
-      df_state_summery$mean_methylation[r] <- mean(meth)
-      df_state_summery$sd_methylation[r] <- sd(meth)
-      
-      df_state_summery$methylation_H3K27AC[r] <-
-        mean(meth_column[index & all_CpG_data_hg19$name != "NO_CHIP"])
-      df_state_summery$methylation_NO_CHIP[r] <-
-        mean(meth_column[index & all_CpG_data_hg19$name == "NO_CHIP"])
-      
-      r <- r + 1
-    }
-  }
-  
-  # change state to factor
-  df_state_summery$state <-
-    factor(x = df_state_summery$state, levels = state_names)
-  
-  # annotate states
-  matching_indices <-
-    match(
-      df_state_summery$state,
-      paste(
-        df_universal_annotation$state_order_by_group,
-        df_universal_annotation$`States  presented in paper`,
-        sep = "_"
-      )
-    )
-  df_state_summery$state_color <-
-    df_universal_annotation$color[matching_indices]
-  df_state_summery$state_group <-
-    factor(df_universal_annotation$Group[matching_indices],
-           levels = unique(df_universal_annotation$Group))
-  # annotate sample
-  matching_indices <- match(df_state_summery$sample, meta$sample)
-  df_state_summery$type <- meta$Type[matching_indices]
-  
-  
-  saveRDS(
-    object = df_state_summery,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("df_state_summery", "rds", sep = ".")
-    )
-  )
-  
-  
   df_plot <-
-    df_state_summery[!grepl(pattern = "GapArtf",
-                            x = df_state_summery$state,
-                            ignore.case = TRUE),]
+    df_state_sample[!grepl(pattern = "GapArtf",
+                           x = df_state_sample$state,
+                           ignore.case = TRUE), ]
   
-  fill_vec <- df_universal_annotation$color[(100-length(unique(df_plot$state))):length(unique(df_plot$state))]
-  
-  muh_grob <- grid::rectGrob(
-    x=1:length(unique(df_plot$state)), y=0, gp=gpar(
-      color='black', fill=rainbow(10) , alpha=0.2))
+  fill_vec <-
+    df_universal_annotation$color[(100 - length(unique(df_plot$state))):length(unique(df_plot$state))]
   
   p <-
     ggplot(data = df_plot ,
@@ -1527,133 +1884,32 @@ if (FALSE) {
     ) +
     ylab("mean sample methylation") +
     xlab("chromatin state labeling") #+
-    # annotation_custom(
-    #   grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.5, ymax=0.1
-    # )
+  # annotation_custom(
+  #   grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.5, ymax=0.1
+  # )
   
   
   
   # +
   #   scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   #
-  ggsave(filename = file.path(
-    OUTPUT_FOLDER,
-    "results",
-    "WholeGenome",
-    paste("methylation_WG_complete_with_test", "png", sep = "."))
-   ,plot = p,width = 24,height = 12)
-  
-  state_column_names <-
-    c(
-      "state",
-      "mean_methylation",
-      "sd_methylation",
-      "mean_delta",
-      "sd_delta",
-      "mean_minus_log_p",
-      "sd_minus_log_p",
-      "n_total",
-      "n_H3K27AC"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_summery_by_state <-
-    data.frame(matrix(
-      NA,
-      nrow = length(state_names),
-      ncol = length(state_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_summery_by_state) <- state_column_names
-  
-  r <- 1
-  for (state in  state_names) {
-    print(state)
-    
-    df_summery_by_state$state[r] <- state
-    
-    index <- all_CpG_data_hg19$state == state
-    meth <- all_CpG_data_hg19[index, as.character(meta$sample)]
-    df_summery_by_state$mean_delta[r] <-
-      mean(all_CpG_data_hg19$pearson.delta[index])
-    df_summery_by_state$sd_delta[r] <-
-      sd(all_CpG_data_hg19$pearson.delta[index])
-    df_summery_by_state$mean_minus_log_p[r] <-
-      mean(-log(all_CpG_data_hg19$pearson.p_val[index]), na.rm = TRUE)
-    df_summery_by_state$sd_minus_log_p[r] <-
-      sd(-log(all_CpG_data_hg19$pearson.p_val[index]), na.rm = TRUE)
-    df_summery_by_state$mean_methylation[r] <-
-      mean(as.matrix(meth))
-    df_summery_by_state$sd_methylation[r] <-
-      sd(as.matrix(meth))
-    df_summery_by_state$n_total[r] <- sum(index)
-    df_summery_by_state$n_H3K27AC[r] <-
-      sum(index & all_CpG_data_hg19$name != "NO_CHIP")
-    r <- r + 1
-  }
-  
-  n_all_CpG <- sum(df_summery_by_state$n_total)
-  n_H3K27AC_CpG <- sum(df_summery_by_state$n_H3K27AC)
-  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
-  
-  df_summery_by_state$expected <-
-    df_summery_by_state$n_total * expected_fraction
-  
-  df_summery_by_state$state <-
-    factor(x = df_summery_by_state$state,
-           levels = state_names)
-  
-  
-  matching_indices <-
-    match(
-      df_summery_by_state$state,
-      paste(
-        df_universal_annotation$state_order_by_group,
-        df_universal_annotation$`States  presented in paper`,
-        sep = "_"
-      )
-    )
-  df_summery_by_state$state <-
-    factor(df_summery_by_state$state, levels = df_summery_by_state$state)
-  df_summery_by_state$state_color <-
-    factor(df_universal_annotation$color[matching_indices],
-           levels = unique(df_universal_annotation$color))
-  df_summery_by_state$state_group <-
-    factor(df_state_summery$state_group[matching_indices],
-           levels = unique(df_state_summery$state_group))
-  
-  df_summery_by_state$p_val_test_all_methylation_KW <- NA
-  
-  for (st in state_names) {
-    print(st)
-    meth <-
-      data.table::setDT(all_CpG_data_hg19[all_CpG_data_hg19$state == st, as.character(meta$sample)])
-    meth <-
-      data.table::melt(
-        data = meth,
-        id.vars = NULL,
-        variable.name = "sample",
-        value.name = "methylation"
-      )
-    # # Perform Kruskal-Wallis test
-    kw_state <- kruskal.test(methylation ~ sample, data = meth)
-    df_summery_by_state$p_val_test_all_methylation_KW[df_summery_by_state$state == st] <-
-      format.pval(kw_state$p.value, digits = 3)
-  }
-  
-  saveRDS(
-    object = df_summery_by_state,
-    file = file.path(
+  ggsave(
+    filename = file.path(
       OUTPUT_FOLDER,
       "results",
       "WholeGenome",
-      paste("df_summery_by_state", "rds", sep = ".")
+      paste("methylation_WG_complete_with_test", "png", sep = ".")
     )
+    ,
+    plot = p,
+    width = 24,
+    height = 12
   )
   
+  
+  
   df_plot_summery_by_state <-
-    df_summery_by_state[!grepl(pattern = "GapArtf", x = df_summery_by_state$state), ]
+    df_state[!grepl(pattern = "GapArtf", x = df_state$state),]
   
   p <-
     ggplot(
@@ -1689,7 +1945,7 @@ if (FALSE) {
   )
   
   p_enrichment <-
-    ggplot(data = df_summery_by_state,
+    ggplot(data = df_state,
            mapping = aes(
              x = state,
              y = n_H3K27AC / expected,
@@ -1721,13 +1977,13 @@ if (FALSE) {
     height = 12
   )
   
-  df_summery_by_state$p_value_NO_CHIP <- NA
-  df_summery_by_state$p_value_CHIP <- NA
+  df_state$p_value_NO_CHIP <- NA
+  df_state$p_value_CHIP <- NA
   
   for (s in 1:length(state_names)) {
     print(s)
     data <-
-      df_state_summery[state_names[s] == df_state_summery$state,]
+      df_state_sample[state_names[s] == df_state_sample$state, ]
     data$age <- meta$age_mean_BP
     
     # Perform Pearson correlation test
@@ -1768,12 +2024,12 @@ if (FALSE) {
     # Extract the p-value from the test results
     p_value_NO_CHIP <- cor_test_NO_CHIP$p.value
     
-    df_summery_by_state$p_value_NO_CHIP[as.character(df_summery_by_state$state) == state_names[s]] <-
+    df_state$p_value_NO_CHIP[as.character(df_state$state) == state_names[s]] <-
       p_value_NO_CHIP
     
     # compare H3K37Ac vs no chip
     n <-
-      df_summery_by_state$n_H3K27AC[as.character(df_summery_by_state$state) == state_names[s]]
+      df_state$n_H3K27AC[as.character(df_state$state) == state_names[s]]
     
     if (n > 3) {
       # Perform Pearson correlation test
@@ -1781,14 +2037,14 @@ if (FALSE) {
         cor.test(data$age, data$methylation_H3K27AC, method = "pearson")
       # Extract the p-value from the test results
       p_value_CHIP <- cor_test_CHIP$p.value
-      df_summery_by_state$p_value_CHIP[as.character(df_summery_by_state$state) == state_names[s]] <-
+      df_state$p_value_CHIP[as.character(df_state$state) == state_names[s]] <-
         p_value_CHIP
     }
     
     
     
     n1 <-
-      df_summery_by_state$n_total[as.character(df_summery_by_state$state) == state_names[s]] - df_summery_by_state$n_H3K27AC[as.character(df_summery_by_state$state) == state_names[s]]
+      df_state$n_total[as.character(df_state$state) == state_names[s]] - df_state$n_H3K27AC[as.character(df_state$state) == state_names[s]]
     
     # Plot scatterplot with trend line
     p1 <- ggplot(data, aes(x = age, y = methylation_NO_CHIP)) +
@@ -1846,14 +2102,14 @@ if (FALSE) {
   }
   
   
-  big_labels <- as.character(df_summery_by_state$state)
-  big_labels[!as.character(df_summery_by_state$state) %in% head(as.character(df_summery_by_state$state)[order(df_summery_by_state$n_H3K27AC, decreasing = TRUE)], 10)] <-
+  big_labels <- as.character(df_state$state)
+  big_labels[!as.character(df_state$state) %in% head(as.character(df_state$state)[order(df_state$n_H3K27AC, decreasing = TRUE)], 10)] <-
     " "
-  df_summery_by_state$big_labels <- big_labels
+  df_state$big_labels <- big_labels
   
   # Create the pie chart with borders
-  p<-
-    ggplot(data = df_summery_by_state, aes(
+  p <-
+    ggplot(data = df_state, aes(
       x = 1,
       y = n_H3K27AC,
       fill = state,
@@ -1863,58 +2119,54 @@ if (FALSE) {
     labs(fill = "State", x = NULL) +   # Legend title
     theme_void() +  # Remove unnecessary elements
     geomtextpath::geom_textpath(
-      data = df_summery_by_state,
+      data = df_state,
       position = position_stack(vjust = 0.5),
-      aes(
-        x = 1.75,
-      ),
+      aes(x = 1.75,),
       size = 3.4,
       show.legend = FALSE
     ) +
     geom_bar(width = 1,
              stat = "identity",
-             color = "black", # Add borders to segments
-             #mapping = aes(fill = state_group)
-    ) +  
-    #theme(legend.position = "none")+
-    scale_fill_manual(values = as.character(df_summery_by_state$state_color))
-
-    ggsave(
-    filename = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      "plots",
-      paste("pie_chart H3K27Ac", "png", sep = ".")
-    )
-    ,
-    plot = p,
-    width = 12,
-    height = 12
-  )
-  
-  # plot for each sample mean methylation of chromatin state  
-  ggplot(data = df_state_summery,mapping = aes(x = sample,y = mean_methylation,color = type))+
-    #geom_boxplot()+
-    geom_point(mapping = aes(color = Group))
-
-    
-    
+             color = "black",
+             # Add borders to segments
+             #mapping = aes(fill = state_group)) +
+             #theme(legend.position = "none")+
+             scale_fill_manual(values = as.character(df_state$state_color)))
+             
+             ggsave(
+               filename = file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 "WholeGenome",
+                 "plots",
+                 paste("pie_chart H3K27Ac", "png", sep = ".")
+               )
+               ,
+               plot = p,
+               width = 12,
+               height = 12
+             )
+             
+             # plot for each sample mean methylation of chromatin state
+             ggplot(data = df_state_sample,
+                    mapping = aes(x = sample, y = mean_methylation, color = type)) +
+               #geom_boxplot()+
+               geom_point(mapping = aes(color = state_group))
+             
+             
+             
 }
 
 # state_dependen_analysis --------------------------------------------------------
 if (state_dependen_analysis) {
   # load data
-  all_CpG_data_hg19 <- readRDS(file = file_name <- file.path(
-    OUTPUT_FOLDER,
-    "results",
-    "WholeGenome",
-    paste("all_data_complete_with_test", "rds", sep = ".")
-  ))
-  
-  state_names <- unique(as.character(all_CpG_data_hg19$state))
-  state_names <- state_names[order(pad_with_zeros(state_names))]
-  
+  all_CpG_complete_with_test <-
+    readRDS(file = file_name <- file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test", "rds", sep = ".")
+    ))
   
   # Specify the folder path
   folder_path <- file.path(OUTPUT_FOLDER,
@@ -1932,15 +2184,13 @@ if (state_dependen_analysis) {
   }
   
   summery_all_state_results <- data.frame()
-  
-  chromatin_state_names <- levels(all_CpG_data_hg19$state)
-  
-  for (s in 1:length(chromatin_state_names)) {
+
+  for (s in 1:length(state_names)) {
     start_time <- Sys.time()
-    state <- chromatin_state_names[s]
+    state <- state_names[s]
     print(state)
     df_state <-
-      all_CpG_data_hg19[all_CpG_data_hg19$state == state, ]
+      all_CpG_complete_with_test[all_CpG_complete_with_test$state == state,]
     
     df_state$pearson.p_val[df_state$pearson.delta == 0] <- 1
     print(paste("# CpG in :", state, nrow(df_state)))
@@ -2004,9 +2254,10 @@ if (state_dependen_analysis) {
   
   
   
-  summery_all_state_results_wide <- pivot_wider(data = summery_all_state_results,
-                                                names_from = slope,
-                                                values_from = fraction_direction_signfincant)
+  summery_all_state_results_wide <-
+    pivot_wider(data = summery_all_state_results,
+                names_from = slope,
+                values_from = fraction_direction_signfincant)
   
   dummy_value <- 1
   summery_all_state_results_wide$negative_enrichment <-
@@ -2016,7 +2267,7 @@ if (state_dependen_analysis) {
   min_delta <- 0.3
   ggplot(
     data =  summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
-                                             summery_all_state_results_wide$minus_log_alpha >= 6,],
+                                             summery_all_state_results_wide$minus_log_alpha >= 6, ],
     mapping = aes(x = minus_log_alpha,
                   y = negative_enrichment,
                   color = permuation_type)
@@ -2027,11 +2278,11 @@ if (state_dependen_analysis) {
   
   slice_0 <-
     summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
-                                     summery_all_state_results_wide$minus_log_alpha == 0,]
+                                     summery_all_state_results_wide$minus_log_alpha == 0, ]
   
   slice_alpha <-
     summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
-                                     summery_all_state_results_wide$minus_log_alpha == alpha,]
+                                     summery_all_state_results_wide$minus_log_alpha == alpha, ]
   
   slice_alpha$percent_negative_significant <-
     slice_alpha$negative_signfincant_CpG / slice_0$negative_signfincant_CpG
@@ -2103,12 +2354,12 @@ if (state_dependen_analysis) {
   
   
   min_delta <- 0.30
-  #all_CpG_data_hg19[all_CpG_data_hg19$pearson.delta >=]
+  #all_CpG_complete_with_test[all_CpG_complete_with_test$pearson.delta >=]
   
   
   ggplot(
     data = summery_all_state_results[summery_all_state_results$min_delta == min_delta &
-                                       summery_all_state_results$minus_log_alpha >= 6,],
+                                       summery_all_state_results$minus_log_alpha >= 6, ],
     mapping = aes(
       x = as.character(minus_log_alpha),
       y = fraction_direction_signfincant,
@@ -2120,7 +2371,7 @@ if (state_dependen_analysis) {
   
   slice <-
     summery_all_state_results[summery_all_state_results$min_delta == min_delta &
-                                summery_all_state_results$minus_log_alpha == alpha, ]
+                                summery_all_state_results$minus_log_alpha == alpha,]
   slice[order(slice$fraction_direction_signfincant, decreasing = TRUE), c("permuation_type",
                                                                           "slope",
                                                                           "fraction_direction_signfincant")]
@@ -2131,19 +2382,20 @@ if (FALSE) {
   min_delta <- 0.3
   max_p <- 0.001
   genome_CpG_data_hg19 <-
-    all_CpG_data_hg19[!grepl(pattern = "GapArtf",
-                             x = all_CpG_data_hg19$state,
-                             ignore.case = TRUE) &
-                        all_CpG_data_hg19$pearson.delta >= min_delta, ]
+    all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
+                                      x = all_CpG_complete_with_test$state,
+                                      ignore.case = TRUE) &
+                                 all_CpG_complete_with_test$pearson.delta >= min_delta,]
   
   counts_min_delta <- genome_CpG_data_hg19 %>%
     count(state)
   
   significant_genome_CpG_data_hg19 <-
-    genome_CpG_data_hg19[genome_CpG_data_hg19$pearson.p_val <= max_p, ]
+    genome_CpG_data_hg19[genome_CpG_data_hg19$pearson.p_val <= max_p,]
   
   counts_sig_min_delta <- significant_genome_CpG_data_hg19 %>%
     count(state)
+  
   
   #plot_age_correlation(df_row = significant_genome_CpG_data_hg19[1,],typisation = real_age_typisation)
   
@@ -2152,7 +2404,6 @@ if (FALSE) {
            "negative",
            "positive")
   
-  library(dplyr)
   # Example calculation
   result <- significant_genome_CpG_data_hg19 %>%
     group_by(state) %>%
@@ -2165,8 +2416,14 @@ if (FALSE) {
     group_by(state) %>%
     count(slope)
   
+  counts_sig_min_delta_slope_by_state_group <- significant_genome_CpG_data_hg19 %>%
+    group_by(state_group) %>%
+    count(slope)
+  
+  
   counts_sig_min_delta_slope$total <-
     rep(x = counts_min_delta$n, each = 2)
+  
   counts_sig_min_delta_slope$fraction <-
     counts_sig_min_delta_slope$n / counts_sig_min_delta_slope$total
   
@@ -2186,6 +2443,12 @@ if (FALSE) {
     factor(df_universal_annotation$Group[matching_indices],
            levels = unique(df_universal_annotation$Group))
   
+  matching_indices <-
+    match(
+      counts_sig_min_delta_slope_by_state_group$state_group,
+      unique(df_universal_annotation$Group)
+    )
+  counts_sig_min_delta_slope_by_state_group$state_color <- unique(df_universal_annotation$color)[matching_indices]
   # sanity check
   # sum(significant_genome_CpG_data_hg19$slope[significant_genome_CpG_data_hg19$state == "99_TSS2"] == "positive",na.rm = TRUE)
   # sum(significant_genome_CpG_data_hg19$slope[significant_genome_CpG_data_hg19$state == "99_TSS2"] == "negative",na.rm = TRUE)
@@ -2245,21 +2508,43 @@ if (FALSE) {
     height = 12
   )
   
+  
+  
   summary_df <- counts_sig_min_delta_slope %>%
     group_by(state_group, slope) %>%
     summarize(n = sum(n),
               total_n = sum(total))
+  
+  summary_df_by_state_group <- counts_sig_min_delta_slope_by_state_group %>%
+    group_by(state_group) %>%
+    summarize(total = sum(n))
+  
+  
   summary_df_wide <- summary_df %>%
     pivot_wider(
       names_from = slope,
       values_from = c(n),
       names_glue = "{slope}_{.value}"
     )
+  
+  summary_df_wide_by_state_group <- counts_sig_min_delta_slope_by_state_group %>%
+    pivot_wider(
+      names_from = slope,
+      values_from = c(n),
+      names_glue = "{slope}_{.value}"
+    )
+  
   summary_df_wide$log_fraction <-
     log(summary_df_wide$negative_n / summary_df_wide$positive_n)
   
+  
+  summary_df_wide_by_state_group$log_fraction <-
+    log(summary_df_wide_by_state_group$negative_n / summary_df_wide_by_state_group$positive_n)
+  
+  
+  
   p <- ggplot(
-    data = summary_df_wide,
+    data = summary_df_wide,#summary_df_wide_by_state_group,
     mapping = aes(
       x = state_group,
       y = log_fraction,
@@ -2273,89 +2558,91 @@ if (FALSE) {
       size = 3,
       mapping = aes(y  =  3)
     ) +  # Add text annotations
-    ggplot2::theme(panel.background = ggplot2::element_blank(),
-                   # axis.text.x = element_text(
-                   #   angle = 90,
-                   #   vjust = 0.5,
-                   #   hjust = 1
-                   # )
-                   ) +
-                   ylab(expression(paste(
-                     log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.3
-                   ))) +
-                     xlab("Chromatin state groups") +
-                     scale_fill_manual(values = unique(df_universal_annotation$color)) +
-                     coord_flip()
-                   
-                   
-                   ggsave(
-                     filename = file.path(
-                       OUTPUT_FOLDER,
-                       "results",
-                       "WholeGenome",
-                       paste("enrichment significant CpG per Group", "png", sep = ".")
-                     )
-                     ,
-                     plot = p,
-                     width = 12,
-                     height = 12
-                   )
-                   
-                   
-                   summary_df_state <- counts_sig_min_delta_slope %>%
-                     group_by(state, state_color, state_group) %>%
-                     summarize(
-                       negative_count = sum(ifelse(slope == "negative", n, 0)),
-                       positive_count = sum(ifelse(slope == "positive", n, 0)),
-                       log_fraction = log(negative_count / positive_count)
-                     )
-                   
-                   
-                   p <- ggplot(
-                     data = summary_df_state,
-                     mapping = aes(
-                       x = state,
-                       y = log_fraction,
-                       fill = state_group,
-                       label = paste("Negative:", negative_count, " ; Positive:", positive_count)
-                     )
-                   ) +
-                     geom_bar(stat = "identity", colour = "black") +
-                     geom_text(
-                       position = position_stack(vjust = 0.5),
-                       size = 3,
-                       mapping = aes(y  =  max(summary_df_state$log_fraction))
-                     ) +  # Add text annotations
-                     ggplot2::theme(panel.background = ggplot2::element_blank(),
-                                    # axis.text.x = element_text(
-                                    #   angle = 90,
-                                    #   vjust = 0.5,
-                                    #   hjust = 1
-                                    # )
-                                    ) +
-                                    ylab(expression(paste(
-                                      log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.3
-                                    ))) +
-                                      xlab("Chromatin state groups") +
-                                      scale_fill_manual(values = unique(df_universal_annotation$color)) +
-                                      coord_flip()
-                                    
-                                    ggsave(
-                                      filename = file.path(
-                                        OUTPUT_FOLDER,
-                                        "results",
-                                        "WholeGenome",
-                                        paste("enrichment significant CpG per state", "png", sep = ".")
-                                      )
-                                      ,
-                                      plot = p,
-                                      width = 12,
-                                      height = 12
-                                    )
+    ggplot2::theme(
+      panel.background = ggplot2::element_blank(),
+      # axis.text.x = element_text(
+      #   angle = 90,
+      #   vjust = 0.5,
+      #   hjust = 1
+      #)
+      ) +
+      ylab(expression(
+        paste(log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.5)
+      )) +
+        xlab("Chromatin state groups") +
+        scale_fill_manual(values = unique(df_universal_annotation$color)[-1]) +
+        coord_flip()
+      
+      
+      ggsave(
+        filename = file.path(
+          OUTPUT_FOLDER,
+          "results",
+          "WholeGenome",
+          paste("enrichment significant CpG per Group", "png", sep = ".")
+        )
+        ,
+        plot = p,
+        width = 12,
+        height = 12
+      )
+      
+      
+      summary_df_state <-
+        counts_sig_min_delta_slope %>%
+        group_by(state, state_color, state_group) %>%
+        summarize(
+          negative_count = sum(ifelse(slope == "negative", n, 0)),
+          positive_count = sum(ifelse(slope == "positive", n, 0)),
+          log_fraction = log(negative_count / positive_count)
+        )
+      
+      
+      p <- ggplot(
+        data = summary_df_state,
+        mapping = aes(
+          x = state,
+          y = log_fraction,
+          fill = state_group,
+          label = paste("Negative:", negative_count, " ; Positive:", positive_count)
+        )
+      ) +
+        geom_bar(stat = "identity", colour = "black") +
+        geom_text(
+          position = position_stack(vjust = 0.5),
+          size = 3,
+          mapping = aes(y  =  max(summary_df_state$log_fraction))
+        ) +  # Add text annotations
+        ggplot2::theme(
+          panel.background = ggplot2::element_blank(),
+          # axis.text.x = element_text(
+          #   angle = 90,
+          #   vjust = 0.5,
+          #   hjust = 1
+          # )
+          ) +
+          ylab(expression(
+            paste(log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.3)
+          )) +
+            xlab("Chromatin state groups") +
+            scale_fill_manual(values = unique(df_universal_annotation$color)) +
+            coord_flip()
+          
+          ggsave(
+            filename = file.path(
+              OUTPUT_FOLDER,
+              "results",
+              "WholeGenome",
+              paste("enrichment significant CpG per state", "png", sep = ".")
+            )
+            ,
+            plot = p,
+            width = 12,
+            height = 12
+          )
 }
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
-  
   print("create_true_stat")
   # compute sample numbers per CpG position
   start_time <- Sys.time()
@@ -2373,7 +2660,7 @@ if (create_true_stat) {
   ), "% of CpG positions"))
   # discard CpG with not full data
   df_peak_CpG_complete <-
-    df_peak_CpG[nrow(real_age_typisation) == df_peak_CpG$score,]
+    df_peak_CpG[nrow(real_age_typisation) == df_peak_CpG$score, ]
   
   # compute real data value kruskall_valis
   start_time <- Sys.time()
@@ -2397,7 +2684,7 @@ if (create_true_stat) {
   
   
   
-  #   df_peak_CpG_complete_with_test <- all_CpG_data_hg19[all_CpG_data_hg19$name != "NO_CHIP",]
+  #   df_peak_CpG_complete_with_test <- all_CpG_complete_with_test[all_CpG_complete_with_test$name != "NO_CHIP",]
   
   saveRDS(
     object = df_peak_CpG_complete_with_test,
@@ -2422,10 +2709,15 @@ if (create_true_stat) {
     file = file.path(OUTPUT_FOLDER, "pearson.real.rds")
   )
   
-  for(s in as.character(meta$sample)){
+  for (s in as.character(meta$sample)) {
     print(s)
-    meth <- as.numeric(df_peak_CpG_complete_with_test[,s])
-    sw_normality <- shapiro.test(sample(x = meth,size = 1000,replace = FALSE)) 
+    meth <- as.numeric(df_peak_CpG_complete_with_test[, s])
+    sw_normality <-
+      shapiro.test(sample(
+        x = meth,
+        size = 1000,
+        replace = FALSE
+      ))
     print(sw_normality)
   }
   
@@ -2435,49 +2727,131 @@ if (create_true_stat) {
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
 }
 # describe LOCUS ---------------------------------------------------------------
-if(FALSE){
-  # all_CpG_data_hg19 <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_data_complete_with_test.rds")
+if (FALSE) {
+  # all_CpG_complete_with_test <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds")
   
-  GH <- list(ID = "GH05J143394",chr = "chr5", start =142774324, end = 142785910)
+  GH <-
+    list(
+      ID = "GH05J143394",
+      chr = "chr5",
+      start = 142774324,
+      end = 142785910
+    )
   Gene <- "NR3C1"
   H3K27ac <- "chr5.142784176.142785514.H3K27ac"
   
   
-  df <- all_CpG_data_hg19[all_CpG_data_hg19$chrom == GH$chr &  
-                                   GH$start - 1000 <= all_CpG_data_hg19$start &
-                            all_CpG_data_hg19$end <= GH$end + 1000,]
+  df <-
+    all_CpG_complete_with_test[all_CpG_complete_with_test$chrom == GH$chr &
+                                 GH$start - 1000 <= all_CpG_complete_with_test$start &
+                                 all_CpG_complete_with_test$end <= GH$end + 1000, ]
   
   unique(df$name)
   
-  loc1 <- data.frame(name = "up Risk of being in a poorly regulated neurobehavioural profile", start =  142783501, end =142783640)
+  loc1 <-
+    data.frame(name = "up Risk of being in a poorly regulated neurobehavioural profile",
+               start =  142783501,
+               end = 142783640)
   
-  loc2 <- data.frame(name = "up Choline", start = 142783501, end = 142783908)
+  loc2 <-
+    data.frame(name = "up Choline",
+               start = 142783501,
+               end = 142783908)
   
-  loc3 <- data.frame(name = "up Adult waist circumference, up adult BMI", start = 142782759, end = 142783164)
+  loc3 <-
+    data.frame(name = "up Adult waist circumference, up adult BMI",
+               start = 142782759,
+               end = 142783164)
   
-  loc4 <- data.frame(name = "up Meat/fish and vegetable intake, down bread/potato intake in late pregnancy", start = 142783579, end = 142783714)
+  loc4 <-
+    data.frame(name = "up Meat/fish and vegetable intake, down bread/potato intake in late pregnancy",
+               start = 142783579,
+               end = 142783714)
   
-  loc5 <- data.frame(name = "up Adult blood pressure", start = 142783578, end = 142783714)
+  loc5 <-
+    data.frame(name = "up Adult blood pressure",
+               start = 142783578,
+               end = 142783714)
   
   xmin <- 142782200
   xmax <- 142785600
   
-  p <- ggplot(data = df,mapping = aes(x = start,y = -log(pearson.p_val)))+
-    geom_rect(aes(xmin = max(GH$start,xmin), xmax = min(xmax,GH$end), ymin = -1, ymax = -0.5), fill = "yellow", alpha = 0.9)+
-    geom_segment(aes(x = xmax, y = -0.7, xend = xmax + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
-    geom_segment(aes(x = xmin, y = -0.7, xend = xmin + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
-    geom_rect(aes(xmin = 142782230, xmax = 142783990, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
+  p <-
+    ggplot(data = df, mapping = aes(x = start, y = -log(pearson.p_val))) +
+    geom_rect(
+      aes(
+        xmin = max(GH$start, xmin),
+        xmax = min(xmax, GH$end),
+        ymin = -1,
+        ymax = -0.5
+      ),
+      fill = "yellow",
+      alpha = 0.9
+    ) +
+    geom_segment(
+      aes(
+        x = xmax,
+        y = -0.7,
+        xend = xmax + 100 ,
+        yend = -0.7
+      ),
+      arrow = arrow(length = unit(0.3, "cm")),
+      color = "yellow"
+    ) +
+    geom_segment(
+      aes(
+        x = xmin,
+        y = -0.7,
+        xend = xmin + 100 ,
+        yend = -0.7
+      ),
+      arrow = arrow(length = unit(0.3, "cm")),
+      color = "yellow"
+    ) +
+    geom_rect(
+      aes(
+        xmin = 142782230,
+        xmax = 142783990,
+        ymin = -0.5,
+        ymax = -0.1
+      ),
+      fill = "LightSkyBlue",
+      alpha = 0.9
+    ) +
     
-    geom_rect(aes(xmin = 142784176, xmax = 142785514, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
-    geom_bar(stat = "identity")+
-    geom_text(aes(x = (xmin + xmax) / 2, y = -0.75, label = GH$ID), color = "black") +
-    geom_text(aes(x = (142782230 + 142783990) / 2, y = -0.3, label = "H3K27Ac"), color = "black") +
-    geom_text(aes(x = (142784176 + 142785514) / 2, y = -0.3, label = "H3K27Ac"), color = "black")+
-    geom_bar(data = df[which.min(df$pearson.p_val),],stat = "identity",color = "red")+
-    ylab(expression(-log(pearson_p[value])))+
-    xlab("Chr5: Genomic position hg19")+
-    xlim(c(xmin,xmax))+
-    theme_minimal()+
+    geom_rect(
+      aes(
+        xmin = 142784176,
+        xmax = 142785514,
+        ymin = -0.5,
+        ymax = -0.1
+      ),
+      fill = "LightSkyBlue",
+      alpha = 0.9
+    ) +
+    geom_bar(stat = "identity") +
+    geom_text(aes(
+      x = (xmin + xmax) / 2,
+      y = -0.75,
+      label = GH$ID
+    ), color = "black") +
+    geom_text(aes(
+      x = (142782230 + 142783990) / 2,
+      y = -0.3,
+      label = "H3K27Ac"
+    ), color = "black") +
+    geom_text(aes(
+      x = (142784176 + 142785514) / 2,
+      y = -0.3,
+      label = "H3K27Ac"
+    ), color = "black") +
+    geom_bar(data = df[which.min(df$pearson.p_val), ],
+             stat = "identity",
+             color = "red") +
+    ylab(expression(-log(pearson_p[value]))) +
+    xlab("Chr5: Genomic position hg19") +
+    xlim(c(xmin, xmax)) +
+    theme_minimal() +
     # geom_rect(aes(xmin = loc1$start, xmax = loc1$end, ymin = -1.5, ymax = -1.4), fill = "green", alpha = 0.9)+
     # geom_rect(aes(xmin = loc2$start, xmax = loc2$end, ymin = -1.4, ymax = -1.3), fill = "green", alpha = 0.9)+
     # geom_rect(aes(xmin = loc3$start, xmax = loc3$end, ymin = -1.3, ymax = -1.2), fill = "green", alpha = 0.9)+
@@ -2485,37 +2859,83 @@ if(FALSE){
     # geom_rect(aes(xmin = loc5$start, xmax = loc5$end, ymin = -1.1, ymax = -1.0), fill = "green", alpha = 0.9)+
     coord_cartesian(expand = c(0, 0))
   
-  ggsave(plot = p,filename = file.path(OUTPUT_FOLDER,"results","pearson",paste(Gene,GH$ID,"png",sep = ".")))
+  ggsave(
+    plot = p,
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "pearson",
+      paste(Gene, GH$ID, "png", sep = ".")
+    )
+  )
   
   # https://clinicalepigeneticsjournal.biomedcentral.com/articles/10.1186/s13148-019-0680-7/tables/2
-  DMR <- list(ID = "ENO2",chr = "chr12", start =7023752, end = 7024121)
-  DMR <- list(ID = "ZNF226",chr = "chr19", start =44669146, end = 44669354)
-  DMR <- list(ID = "CCDC51/TMA7",chr = "chr3", start =48481268, end = 48481793)
+  DMR <-
+    list(
+      ID = "ENO2",
+      chr = "chr12",
+      start = 7023752,
+      end = 7024121
+    )
+  DMR <-
+    list(
+      ID = "ZNF226",
+      chr = "chr19",
+      start = 44669146,
+      end = 44669354
+    )
+  DMR <-
+    list(
+      ID = "CCDC51/TMA7",
+      chr = "chr3",
+      start = 48481268,
+      end = 48481793
+    )
   
-  df <- all_CpG_data_hg19[all_CpG_data_hg19$chrom == DMR$chr &  
-                            DMR$start - 1000 <= all_CpG_data_hg19$start &
-                            all_CpG_data_hg19$end <= DMR$end + 1000,]
+  df <-
+    all_CpG_complete_with_test[all_CpG_complete_with_test$chrom == DMR$chr &
+                                 DMR$start - 1000 <= all_CpG_complete_with_test$start &
+                                 all_CpG_complete_with_test$end <= DMR$end + 1000, ]
   
   xmin <- DMR$start - 1000
   xmax <- DMR$end + 1000
   
   unique(df$name)
   
-  p <- ggplot(data = df,mapping = aes(x = start,y = -log(pearson.p_val)))+
-    geom_rect(aes(xmin = max(GH$start,xmin), xmax = min(xmax,GH$end), ymin = -1, ymax = -0.5), fill = "yellow", alpha = 0.9)+
+  p <-
+    ggplot(data = df, mapping = aes(x = start, y = -log(pearson.p_val))) +
+    geom_rect(
+      aes(
+        xmin = max(GH$start, xmin),
+        xmax = min(xmax, GH$end),
+        ymin = -1,
+        ymax = -0.5
+      ),
+      fill = "yellow",
+      alpha = 0.9
+    ) +
     # geom_segment(aes(x = xmax, y = -0.7, xend = xmax + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
     # geom_segment(aes(x = xmin, y = -0.7, xend = xmin + 100 , yend = -0.7), arrow = arrow(length = unit(0.3, "cm")), color = "yellow")+
-    geom_rect(aes(xmin = 48481218, xmax = 48482176, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
+    geom_rect(
+      aes(
+        xmin = 48481218,
+        xmax = 48482176,
+        ymin = -0.5,
+        ymax = -0.1
+      ),
+      fill = "LightSkyBlue",
+      alpha = 0.9
+    ) +
     #geom_rect(aes(xmin = 142784176, xmax = 142785514, ymin = -0.5, ymax = -0.1), fill = "LightSkyBlue", alpha = 0.9)+
-    geom_bar(stat = "identity")+
+    geom_bar(stat = "identity") +
     #geom_text(aes(x = (xmin + xmax) / 2, y = -0.75, label = GH$ID), color = "black") +
     #geom_text(aes(x = (142782230 + 142783990) / 2, y = -0.3, label = "H3K27Ac"), color = "black") +
     #geom_text(aes(x = (142784176 + 142785514) / 2, y = -0.3, label = "H3K27Ac"), color = "black")+
     #geom_bar(data = df[which.min(df$pearson.p_val),],stat = "identity",color = "red")+
-    ylab(expression(-log(pearson_p[value])))+
-    xlab(paste(DMR$chr,": Genomic position hg19"))+
-    xlim(c(xmin,xmax))+
-    theme_minimal()+
+    ylab(expression(-log(pearson_p[value]))) +
+    xlab(paste(DMR$chr, ": Genomic position hg19")) +
+    xlim(c(xmin, xmax)) +
+    theme_minimal() +
     # geom_rect(aes(xmin = loc1$start, xmax = loc1$end, ymin = -1.5, ymax = -1.4), fill = "green", alpha = 0.9)+
     # geom_rect(aes(xmin = loc2$start, xmax = loc2$end, ymin = -1.4, ymax = -1.3), fill = "green", alpha = 0.9)+
     # geom_rect(aes(xmin = loc3$start, xmax = loc3$end, ymin = -1.3, ymax = -1.2), fill = "green", alpha = 0.9)+
@@ -2706,7 +3126,7 @@ if (describe_Data) {
   #   height = 8
   # )
   
-  x_max <- 12000
+  x_max <- 11000
   
   ggplot(data.frame(meta), aes(x = age_mean_BP, y = 0, color = Type)) +
     #geom_point(size = 5,shape = 25, mapping = aes(y = 0.05))  +
@@ -2738,8 +3158,7 @@ if (describe_Data) {
     geom_point(shape = 108, size = 4) +
     ggrepel::geom_label_repel(aes(label = sample), col = "black") +
     scale_x_continuous(breaks = seq(0, x_max, by = 1000),
-                       limits = c(0, x_max),
-    ) +
+                       limits = c(0, x_max),) +
     scale_y_continuous(limits = c(-3, 3)) +
     theme(
       panel.background = element_blank(),
@@ -2749,9 +3168,12 @@ if (describe_Data) {
     ) + xlab("years before present (B.P.)") +
     scale_color_discrete(name = "lifestyle/diet")
   
+  plot_meta <- data.frame(meta)
+  plot_meta$Type <-
+    factor(plot_meta$Type, levels = mean_age_by_type$Type)
   
   p <-
-    ggplot(data.frame(meta), aes(x = age_mean_BP, y = 0, fill = Type)) +
+    ggplot(data = plot_meta , aes(x = age_mean_BP, y = 0, fill = Type)) +
     geom_point(size = 5,
                shape = 25,
                mapping = aes(y = 0.05))  +
@@ -2783,8 +3205,7 @@ if (describe_Data) {
     #geom_point(shape = 108, size = 4)+
     #ggrepel::geom_label_repel(aes(label = sample), col = "black") +
     scale_x_continuous(breaks = seq(0, x_max, by = 1000),
-                       limits = c(0, x_max),
-    ) +
+                       limits = c(0, x_max),) +
     scale_y_continuous(limits = c(-3, 3)) +
     theme(
       panel.background = element_blank(),
@@ -2792,7 +3213,9 @@ if (describe_Data) {
       axis.ticks.y = element_blank(),
       axis.title.y = element_blank()
     ) + xlab("years before present (B.P.)") +
-    scale_fill_discrete(name = "lifestyle/diet")
+    scale_fill_manual(name = "lifestyle/diet",
+                      values = mean_age_by_type$color,
+                      labels = mean_age_by_type$Type)
   
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
@@ -2804,45 +3227,46 @@ if (describe_Data) {
   )
   
 }
+#"#F8766D" "#A3A500" "#00BF7D" "#00B0F6" "#E76BF3"
 # Calculate column permutation simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
   dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 9
+  n_repetitions <- 200
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
     print(rep)
     
-    # permutation_age  <-
-    #   create_horizontal_permutated_typisation(real_age_typisation)
+    permutation_age  <-
+      create_horizontal_permutated_typisation(real_age_typisation)
     permutation_food  <-
       create_horizontal_permutated_typisation(real_food_typisation)
     
-    #sim_age_typisation <- permutation_age$sim_typisation
+    sim_age_typisation <- permutation_age$sim_typisation
     sim_food_typisation <- permutation_food$sim_typisation
     
-    # permutation_age$data <-
-    #   parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test, age.typisation = sim_age_typisation)
+    permutation_age$data <-
+      parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test, age.typisation = sim_age_typisation)
     
     permutation_food$data <-
       parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test, food.typisation = sim_food_typisation)
     
-    # # save age permutation
-    # sim_age_file_name <-
-    #   paste(
-    #     "pearson",
-    #     "horizontal",
-    #     paste(permutation_age$permuation_order, collapse = "_"),
-    #     "rds",
-    #     sep = "."
-    #   )
-    # saveRDS(
-    #   object = permutation_age,
-    #   file = file.path(OUTPUT_FOLDER, "simulation", sim_age_file_name)
-    # )
+    # save age permutation
+    sim_age_file_name <-
+      paste(
+        "pearson",
+        "horizontal",
+        paste(permutation_age$permuation_order, collapse = "_"),
+        "rds",
+        sep = "."
+      )
+    saveRDS(
+      object = permutation_age,
+      file = file.path(OUTPUT_FOLDER, "simulation", sim_age_file_name)
+    )
     
     # save food permutation
     sim_food_file_name <-
@@ -2869,7 +3293,7 @@ if (create_CpG_permutations_vertical) {
   print("create_CpG_permutations_vertical")
   dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 197
+  n_repetitions <- 50
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -2978,9 +3402,9 @@ if (histogramm_plots) {
     readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results2023.rds"))
   
   sim_results_pearson_CpG <-
-    sim_results[sim_results$test == "pearson",]
+    sim_results[sim_results$test == "pearson", ]
   sim_results_pearson_horizontal <-
-    sim_results_pearson_horizontal[sim_results_pearson_horizontal$test == "pearson",]
+    sim_results_pearson_horizontal[sim_results_pearson_horizontal$test == "pearson", ]
   
   
   df_plot <-
@@ -3002,20 +3426,18 @@ if (histogramm_plots) {
     )
   
   df_plot$alpha <- c(
-    sim_results_pearson_CpG$minus_log_alpha,
-    -sim_results_pearson_CpG$minus_log_alpha
+    sim_results_pearson_CpG$minus_log_alpha,-sim_results_pearson_CpG$minus_log_alpha
   )
   df_plot_horizontal$alpha <-
     c(
-      sim_results_pearson_horizontal$minus_log_alpha,
-      -sim_results_pearson_horizontal$minus_log_alpha
+      sim_results_pearson_horizontal$minus_log_alpha,-sim_results_pearson_horizontal$minus_log_alpha
     )
   
   
   
   # prepare real resluts
   real_results_pearson <-
-    real_results[real_results$test == "pearson",]
+    real_results[real_results$test == "pearson", ]
   
   
   df_plot_real <-
@@ -3029,31 +3451,31 @@ if (histogramm_plots) {
     )
   
   df_plot_real$alpha <-
-    c(real_results_pearson$minus_log_alpha,
-      -real_results_pearson$minus_log_alpha)
+    c(real_results_pearson$minus_log_alpha,-real_results_pearson$minus_log_alpha)
   
-  df_plot_real_1 <- df_plot_real[df_plot_real$min_delta == delta,]
-  df_plot_1 <- df_plot[df_plot$min_delta == delta,]
+  df_plot_real_1 <- df_plot_real[df_plot_real$min_delta == delta, ]
+  df_plot_1 <- df_plot[df_plot$min_delta == delta, ]
   df_plot_horizontal_1 <-
-    df_plot_horizontal[df_plot_horizontal$min_delta == delta,]
+    df_plot_horizontal[df_plot_horizontal$min_delta == delta, ]
   
   
   p <-
-    ggplot(data = df_plot_1[abs(as.numeric(df_plot$alpha)) > cut_off,] ,
+    ggplot(data = df_plot_1[abs(as.numeric(df_plot$alpha)) > cut_off, ] ,
            mapping = aes(x = alpha, y = significant, group = alpha)) +
     geom_boxplot(color = "green", outlier.shape = NA) +
     geom_boxplot(
-      data = df_plot_horizontal_1[abs(as.numeric(df_plot_horizontal_1$alpha)) > cut_off,],
+      data = df_plot_horizontal_1[abs(as.numeric(df_plot_horizontal_1$alpha)) > cut_off, ],
       mapping = aes(x = alpha, y = significant, group = alpha),
       color = "blue",
       outlier.shape = NA
     ) +
-    geom_point(data = df_plot_real_1[abs(as.numeric(df_plot_real_1$alpha)) > cut_off,], color = "red") +
+    geom_point(data = df_plot_real_1[abs(as.numeric(df_plot_real_1$alpha)) > cut_off, ], color = "red") +
     theme_minimal() +
     scale_color_discrete(#name = "Dose",
       labels = c("CpG permuatation", "age permuation", "real data"))
   
-  folder_name <- paste("delta", delta, "minLogP", alpha_p, sep = "_")
+  folder_name <-
+    paste("delta", delta, "minLogP", alpha_p, sep = "_")
   file_name <- "CDF_p_value destribution.png"
   
   ggsave(
@@ -3097,7 +3519,7 @@ if (histogramm_plots) {
   #df_plot_single_delta$alpha <- as.character(df_plot_single_delta$alpha)
   
   ggplot(data = df_plot_all[df_plot_all$min_delta == delta &
-                              as.numeric(df_plot_all$alpha) > cut_off,],
+                              as.numeric(df_plot_all$alpha) > cut_off, ],
          mapping = aes(x = alpha, y = significant, fill = name)) +
     geom_boxplot(outlier.shape = NA)
   
@@ -3153,7 +3575,7 @@ if (histogramm_plots) {
   
   p <-
     ggplot(
-      data = df_plot_simmulations[df_plot_simmulations$name != "pearson.CpG_permutation",],
+      data = df_plot_simmulations[df_plot_simmulations$name != "pearson.CpG_permutation", ],
       mapping = aes(
         x = alpha_string,
         y = significant,
@@ -3205,8 +3627,8 @@ if (histogramm_plots) {
   )
   
   CpGs_with_delta <-
-    rbind(real_CpGs_with_delta_cutoff[real_CpGs_with_delta_cutoff$test == "pearson", ],
-          CpGs_with_delta_cutoff[CpGs_with_delta_cutoff$test == "pearson", ])
+    rbind(real_CpGs_with_delta_cutoff[real_CpGs_with_delta_cutoff$test == "pearson",],
+          CpGs_with_delta_cutoff[CpGs_with_delta_cutoff$test == "pearson",])
   
   # ggplot(
   #   data = CpGs_with_delta,
@@ -3312,7 +3734,7 @@ if (histogramm_plots) {
   legend_title <-
     bquote("destribution of methylation variability" ~ delta[meth])
   p <-
-    ggplot(data = count_CpGs_with_delta_histogramm[count_CpGs_with_delta_histogramm$test == "pearson",],
+    ggplot(data = count_CpGs_with_delta_histogramm[count_CpGs_with_delta_histogramm$test == "pearson", ],
            mapping = aes(
              x = x,
              y = y,
@@ -3460,8 +3882,10 @@ if (summerize_horizonal_columns_permutations) {
   #              pattern = "*.horizontal.*")
   
   file_names <-
-    list.files(path = file.path(OUTPUT_FOLDER, "simulation"),
-               pattern = paste(test,"horizontal.*",sep = "."))
+    list.files(
+      path = file.path(OUTPUT_FOLDER, "simulation"),
+      pattern = paste(test, "horizontal.*", sep = ".")
+    )
   
   start_time <- Sys.time()
   sim_results <-
@@ -3475,10 +3899,11 @@ if (summerize_horizonal_columns_permutations) {
   #   file = file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds")
   # )
   
-  saveRDS(
-    object = sim_results,
-    file = file.path(OUTPUT_FOLDER, paste(test,"horizontal.sim_results.rds",sep = "."))
-  )
+  saveRDS(object = sim_results,
+          file = file.path(
+            OUTPUT_FOLDER,
+            paste(test, "horizontal.sim_results.rds", sep = ".")
+          ))
 }
 
 # Evaluate real values ----------------------------------------------------
@@ -3528,7 +3953,7 @@ if (aggregate_CpG_results) {
       df_empirical_means$min_delta,
       df_empirical_means$minus_log_alpha,
       df_empirical_means$test
-    ),]
+    ), ]
   
   df_empirical_means$real_count <-
     real_results$n_signfincant_CpG[order(real_results$min_delta,
@@ -3545,7 +3970,7 @@ if (aggregate_CpG_results) {
   #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
   
   ggplot(
-    data = sim_results[sim_results$min_delta == 0.39,],
+    data = sim_results[sim_results$min_delta == 0.39, ],
     mapping = aes(x = minus_log_alpha,
                   y = n_signfincant_CpG,
                   color = name)
@@ -3556,18 +3981,18 @@ if (aggregate_CpG_results) {
   
   for (delta in unique(sim_results$min_delta)) {
     print(delta)
-    sims_delta <- sim_results[sim_results$min_delta == delta, ]
+    sims_delta <- sim_results[sim_results$min_delta == delta,]
     
     for (minus_log_alpha in seq(from = 5, to = 10, by = 1)) {
       print(head(real_results[real_results$min_delta == delta &
-                                real_results$minus_log_alpha == minus_log_alpha, ]))
+                                real_results$minus_log_alpha == minus_log_alpha,]))
       for (t in unique(sims_delta$test)) {
         print(t)
         sims <-
           sims_delta[sims_delta$minus_log_alpha == minus_log_alpha &
-                       sims_delta$test == t, ]
+                       sims_delta$test == t,]
         sims <-
-          sims[order(sims$n_signfincant_CpG, decreasing = TRUE), ]
+          sims[order(sims$n_signfincant_CpG, decreasing = TRUE),]
         print(head(sims, 3))
         print(nrow(sims))
       }
@@ -3600,13 +4025,13 @@ if (aggregate_horizontal_results) {
       df_empirical_means$min_delta,
       df_empirical_means$minus_log_alpha,
       df_empirical_means$test
-    ), ]
+    ),]
   
   
   df_empirical_means <-
-    df_empirical_means[df_empirical_means$test == test, ]
+    df_empirical_means[df_empirical_means$test == test,]
   
-  real_results_test <- real_results[test ==  real_results$test, ]
+  real_results_test <- real_results[test ==  real_results$test,]
   #ggplot(data = real_results_test[real_results_test$min_delta == 0.3,],mapping = aes(x = minus_log_alpha,y = n_signfincant_CpG))+geom_point()
   
   
@@ -3614,20 +4039,21 @@ if (aggregate_horizontal_results) {
     real_results_test$n_signfincant_CpG[order(real_results_test$min_delta,
                                               real_results_test$minus_log_alpha)]
   
-
+  
   # df_empirical_means$real_count <-
   #   real_results$n_signfincant_CpG[order(real_results$min_delta,
   #                                        real_results$minus_log_alpha,
   #                                        real_results$test)]
-
+  
   df_empirical_means$FDR <-
     df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
   
   #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_CpG_vertical_empirical_means.rds"))
-  saveRDS(
-    object = df_empirical_means,
-    file = file.path(OUTPUT_FOLDER, paste(test,"df_horizontal_column_empirical_means.rds",sep = "."))
-  )
+  saveRDS(object = df_empirical_means,
+          file = file.path(
+            OUTPUT_FOLDER,
+            paste(test, "df_horizontal_column_empirical_means.rds", sep = ".")
+          ))
 }
 # plot landscape -------------------------------------------------------
 if (plot_landscape) {
@@ -3647,10 +4073,11 @@ if (plot_landscape) {
     df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
                          df_empirical_means$minus_log_alpha <= max_alpha &
                          df_empirical_means$min_delta > min_delta &
-                         df_empirical_means$test == test 
-                      & min_real_count <= df_empirical_means$real_count 
-                      # &  df_empirical_means$n_signfincant_CpG > 0
-                      , ]
+                         df_empirical_means$test == test
+                       &
+                         min_real_count <= df_empirical_means$real_count
+                       # &  df_empirical_means$n_signfincant_CpG > 0
+                       ,]
   
   plotly::plot_ly(
     search_df ,
@@ -3664,10 +4091,10 @@ if (plot_landscape) {
     )
   )
   
-  best_values <- search_df[which.min(search_df$FDR), ]
+  best_values <- search_df[which.min(search_df$FDR),]
   best_CpGs <-
     df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$kw.delta >= best_values$min_delta &
-                                     df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha),]
+                                     df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha), ]
   
   folder_name <- paste("delta",
                        best_values$min_delta,
@@ -3691,7 +4118,7 @@ if (plot_landscape) {
   )
   for (r in 1:nrow(best_CpGs)) {
     p <-
-      plot_food_correlation(df_row = best_CpGs[r, ], typisation = real_food_typisation)
+      plot_food_correlation(df_row = best_CpGs[r,], typisation = real_food_typisation)
     ggsave(
       plot = p,
       filename = file.path(
@@ -3709,7 +4136,7 @@ if (plot_landscape) {
     )
     
     p <-
-      plot_age_correlation(df_row = best_CpGs[r, ], typisation = real_age_typisation)
+      plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
     ggsave(
       plot = p,
       filename = file.path(
@@ -3740,7 +4167,7 @@ if (pearson_landscape) {
                          df_empirical_means$minus_log_alpha <= max_alpha &
                          df_empirical_means$min_delta > min_delta &
                          df_empirical_means$test == test &
-                         min_real_count <= df_empirical_means$real_count, ]
+                         min_real_count <= df_empirical_means$real_count,]
   
   # debug
   #
@@ -3763,25 +4190,25 @@ if (pearson_landscape) {
   )
   
   
-  # index <- all_CpG_data_hg19$name != "NO_CHIP" &
-  #   all_CpG_data_hg19$pearson.delta >= 0.39 &
-  #   all_CpG_data_hg19$pearson.p_val <= exp(-9.3)
-  # 
+  # index <- all_CpG_complete_with_test$name != "NO_CHIP" &
+  #   all_CpG_complete_with_test$pearson.delta >= 0.39 &
+  #   all_CpG_complete_with_test$pearson.p_val <= exp(-9.3)
+  #
   # best_CpGs <-
-  #   all_CpG_data_hg19[index,]
+  #   all_CpG_complete_with_test[index,]
   
   # best_CpGs2 <-
   #   df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= 0.3 &
   #                                    df_peak_CpG_complete_with_test$pearson.p_val <= exp(-9.3), ]
   
   
-  best_values <- search_df[which.min(search_df$FDR),]
+  best_values <- search_df[which.min(search_df$FDR), ]
   best_CpGs <-
     df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= best_values$min_delta &
-                                     df_peak_CpG_complete_with_test$pearson.p_val <= exp(-best_values$minus_log_alpha), ]
+                                     df_peak_CpG_complete_with_test$pearson.p_val <= exp(-best_values$minus_log_alpha),]
   
   
-
+  
   folder_name <- paste("delta",
                        best_values$min_delta,
                        "minLogP",
@@ -3806,7 +4233,7 @@ if (pearson_landscape) {
   )
   for (r in 1:nrow(best_CpGs)) {
     p <-
-      plot_age_correlation(df_row = best_CpGs[r, ], typisation = real_age_typisation)
+      plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
     ggsave(
       plot = p,
       filename = file.path(
@@ -3825,15 +4252,16 @@ if (pearson_landscape) {
 # manual selection  --------------------------------------------------
 if (FALSE) {
   test <- "pearson"
-  all_data_complete_with_test <-
+  all_CpG_complete_with_test <-
     readRDS(
-      "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_data_complete_with_test.rds"
+      "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds"
     )
   
   p_significance_cut_off <- exp(-9.3)
   print(paste("p_significance_cut_off", p_significance_cut_off))
   print(paste(
-    "-log(p_significance_cut_off)",-log(p_significance_cut_off)
+    "-log(p_significance_cut_off)",
+    -log(p_significance_cut_off)
   ))
   min_delta <- 0.39
   print(paste("min_delta ", min_delta))
@@ -3851,25 +4279,33 @@ if (FALSE) {
   
   
   significant_CpGs <-
-    all_data_complete_with_test[all_data_complete_with_test$name != "NO_CHIP" &
-                                  all_data_complete_with_test$pearson.delta >= min_delta  &
-                                  all_data_complete_with_test$pearson.p_val <= p_significance_cut_off,]
+    all_CpG_complete_with_test[all_CpG_complete_with_test$name != "NO_CHIP" &
+                                 all_CpG_complete_with_test$pearson.delta >= min_delta  &
+                                 all_CpG_complete_with_test$pearson.p_val <= p_significance_cut_off, ]
   print(nrow(significant_CpGs))
   
   
   # Create a data frame with counts of each state
   state_counts <- table(significant_CpGs$state)
-  state_counts_df <- data.frame(state = names(state_counts), count = as.numeric(state_counts))
-  state_counts_df$state_color <- factor(x = df_universal_annotation$color,levels = unique(df_universal_annotation$color))
-  state_counts_df$state_group <- factor(x =  df_universal_annotation$Group,levels = unique(df_universal_annotation$Group))
-  state_counts_df$state <- factor(x = state_counts_df$state,levels = unique(state_counts_df$state))
+  state_counts_df <-
+    data.frame(state = names(state_counts),
+               count = as.numeric(state_counts))
+  state_counts_df$state_color <-
+    factor(x = df_universal_annotation$color,
+           levels = unique(df_universal_annotation$color))
+  state_counts_df$state_group <-
+    factor(x =  df_universal_annotation$Group,
+           levels = unique(df_universal_annotation$Group))
+  state_counts_df$state <-
+    factor(x = state_counts_df$state,
+           levels = unique(state_counts_df$state))
   big_labels <- as.character(state_counts_df$state)
   big_labels[state_counts_df$count == 0] <-  " "
   state_counts_df$big_labels <- big_labels
   count_label <- as.character(state_counts_df$count)
   count_label[state_counts_df$count == 0] <-  " "
   # Create the pie chart with borders
-  p<-
+  p <-
     ggplot(data = state_counts_df, aes(
       x = 1,
       y = count,
@@ -3882,229 +4318,227 @@ if (FALSE) {
     #geom_text(mapping = aes(label = count))+
     geom_bar(width = 1,
              stat = "identity",
-             color = "black", # Add borders to segments
+             color = "black",
+             # Add borders to segments
              #mapping = aes(fill = state_group)
-    ) +  
-    geomtextpath::geom_textpath(
-      data = state_counts_df,
-      position = position_stack(vjust = 0.5),
-      aes(
-        x = 1.75,
-      ),
-      size = 3.4,
-      #show.legend = FALSE
-    ) +
-    geomtextpath::geom_textpath(
-      data = state_counts_df,
-      position = position_stack(vjust = 0.5),
-      aes(
-        x = 1.2,
-      ),
-      size = 3.4,
-      label = count_label
-      #show.legend = FALSE
-    )+
-    #theme(legend.position = "none")+
-    scale_fill_manual(values = as.character(df_universal_annotation$color))
-  
-  ggsave(
-    filename = file.path(
-      OUTPUT_FOLDER,folder_name,
-      paste("pie_chart results", "png", sep = ".")
-    )
-    ,
-    plot = p,
-    width = 12,
-    height = 12
-  )
-  
-  bed4 <- significant_CpGs[, c("chrom", "start", "end", "name")]
-  
-  write.table(
-    x = bed4,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      "significant_CpGs.bed"
-    ),
-    sep = "\t",
-    quote = FALSE,
-    row.names = FALSE,
-    col.names = FALSE
-  )
-  
-  bed_for_meme <- bed4 %>%
-    dplyr::distinct(name, .keep_all = TRUE)
-  
-  add_nucleotides <- 25
-  
-  for (r in 1:length(unique(bed_for_meme$name))) {
-    peak <- bed_for_meme$name[r]
-    temp <- significant_CpGs[significant_CpGs$name == peak,]
-    
-    bed_for_meme$start[r] <- min(temp$start) - add_nucleotides
-    bed_for_meme$end[r] <- max(temp$start) + add_nucleotides
-  }
-  
-  bed_for_meme$score <- 1000.
-  bed_for_meme$strand <- "."
-  
-  write.table(
-    x = bed_for_meme[,],
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      paste(
-        "bed_for_meme",
-        "add_nucleotides",
-        add_nucleotides,
-        "bed",
-        sep = "."
-      )
-    ),
-    sep = "\t",
-    quote = FALSE,
-    row.names = FALSE,
-    col.names = FALSE
-  )
-  
-  ### make Genhancer query with files https://genome.ucsc.edu/cgi-bin/hgTables
-  # C:\Users\Daniel Batyrev\Documents\GitHub\HumanEvo\HumanEvo\12.pipeline\results\pearson\delta_0.39_minLogP_9.3
-  # GH Interactio double elite hg19
-  
-  # Database: hg19    Primary Table: geneHancerInteractionsDoubleElite Data last updated: 2019-01-15
-  # Big Bed File Download: /gbdb/hg19/geneHancer/geneHancerInteractionsDoubleElite.v2.hg19.bb
-  
-  df_GH <- read.delim(
-    file =  file.path(OUTPUT_FOLDER,
-                      "results",
-                      test,
-                      folder_name,
-                      "hgTables.txt"),
-    header = FALSE,
-    skip = 1,
-    col.names = colnames(significant_CpGs)[1:5]
-  )
-  
-  significant_CpGs$GeneAnnotation <- NA
-  significant_CpGs$EnhancerAnnotation <- NA
-  
-  for (r in 1:nrow(significant_CpGs)) {
-    # r <- 1
-    annotated_GH <-
-      df_GH[significant_CpGs$chrom[r] == df_GH$chrom &
-              df_GH$start <= significant_CpGs$start[r] &
-              significant_CpGs$end[r] <= df_GH$end, ]
-    # if any annotation found
-    if (nrow(annotated_GH) > 0) {
-      # choose annotation with highest score
-      annotation <-
-        unlist(strsplit(annotated_GH$name[which.max(annotated_GH$score)], split = "/")) #annotated_GH$name[which.max(annotated_GH$score)]
-      # get highest score
-      significant_CpGs$score <-
-        annotated_GH$score[which.max(annotated_GH$score)]
-      significant_CpGs$GeneAnnotation[r] <- annotation[1]
-      significant_CpGs$EnhancerAnnotation[r] <- annotation[2]
-    }
-  }
-  
-  print(paste("#of positive correlation CpGs : ",   nrow(significant_CpGs[significant_CpGs$pearson.statistic > 0 , ])))
-  
-  
-  print(paste("#of H3K27AC peaks : ", length(unique(
-    significant_CpGs$name
-  ))))
-  
-  print(paste("#of annotated enhancers : ", length(
-    unique(significant_CpGs$EnhancerAnnotation)
-  )))
-  print(paste("#of annotated genes : ", length(
-    unique(significant_CpGs$GeneAnnotation)
-  )))
-  
-  openxlsx::write.xlsx(
-    x = significant_CpGs,
-    file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      "significant_CpGs.xlsx"
-    ),
-    sheetName = "significant_CpGS",
-    colNames = TRUE
-  )
-  
-  
-  write.csv2(
-    x = unique(significant_CpGs$GeneAnnotation[!is.na(significant_CpGs$GeneAnnotation)]),
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      paste(
-        "unique.genes",
-        min_delta,
-        "delta.GH_Interactions",
-        "p",
-        p_significance_cut_off,
-        "csv",
-        sep = "."
-      )
-    ),
-    quote = FALSE,
-    row.names = FALSE,
-    col.names = FALSE
-  )
-  
-  saveRDS(
-    object = significant_CpGs,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "pearson",
-      folder_name,
-      "significant_CpGs.rds"
-    )
-  )
-  
-  dir.create(
-    path = file.path(OUTPUT_FOLDER,
-                     "results",
-                     test,
-                     folder_name,
-                     "plots"),
-    showWarnings = FALSE
-  )
-  
-  
-  for (r in 1:nrow(significant_CpGs)) {
-    p <-
-      plot_age_correlation(df_row = significant_CpGs[r, ], typisation = real_age_typisation)
-    ggsave(
-      plot = p,
-      filename = file.path(
-        OUTPUT_FOLDER,
-        "results",
-        test,
-        folder_name,
-        "plots",
-        paste(
-          significant_CpGs$GeneAnnotation[r],
-          significant_CpGs$state[r],
-          significant_CpGs$chrom[r],
-          significant_CpGs$start[r],
-          ".png",
-          sep = "."
-        )
-      )
-    )
-  }
+             ) +
+             geomtextpath::geom_textpath(
+               data = state_counts_df,
+               position = position_stack(vjust = 0.5),
+               aes(x = 1.75,),
+               size = 3.4#,
+               #show.legend = FALSE
+             ) +
+               geomtextpath::geom_textpath(
+                 data = state_counts_df,
+                 position = position_stack(vjust = 0.5),
+                 aes(x = 1.2,),
+                 size = 3.4,
+                 label = count_label
+                 #show.legend = FALSE
+               ) +
+               #theme(legend.position = "none")+
+               scale_fill_manual(values = as.character(df_universal_annotation$color))
+             
+             ggsave(
+               filename = file.path(
+                 OUTPUT_FOLDER,
+                 folder_name,
+                 paste("pie_chart results", "png", sep = ".")
+               )
+               ,
+               plot = p,
+               width = 12,
+               height = 12
+             )
+             
+             bed4 <- significant_CpGs[, c("chrom", "start", "end", "name")]
+             
+             write.table(
+               x = bed4,
+               file = file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 test,
+                 folder_name,
+                 "significant_CpGs.bed"
+               ),
+               sep = "\t",
+               quote = FALSE,
+               row.names = FALSE,
+               col.names = FALSE
+             )
+             
+             bed_for_meme <- bed4 %>%
+               dplyr::distinct(name, .keep_all = TRUE)
+             
+             add_nucleotides <- 25
+             
+             for (r in 1:length(unique(bed_for_meme$name))) {
+               peak <- bed_for_meme$name[r]
+               temp <- significant_CpGs[significant_CpGs$name == peak, ]
+               
+               bed_for_meme$start[r] <- min(temp$start) - add_nucleotides
+               bed_for_meme$end[r] <- max(temp$start) + add_nucleotides
+             }
+             
+             bed_for_meme$score <- 1000.
+             bed_for_meme$strand <- "."
+             
+             write.table(
+               x = bed_for_meme[, ],
+               file = file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 test,
+                 folder_name,
+                 paste(
+                   "bed_for_meme",
+                   "add_nucleotides",
+                   add_nucleotides,
+                   "bed",
+                   sep = "."
+                 )
+               ),
+               sep = "\t",
+               quote = FALSE,
+               row.names = FALSE,
+               col.names = FALSE
+             )
+             
+             ### make Genhancer query with files https://genome.ucsc.edu/cgi-bin/hgTables
+             # C:\Users\Daniel Batyrev\Documents\GitHub\HumanEvo\HumanEvo\12.pipeline\results\pearson\delta_0.39_minLogP_9.3
+             # GH Interactio double elite hg19
+             
+             # Database: hg19    Primary Table: geneHancerInteractionsDoubleElite Data last updated: 2019-01-15
+             # Big Bed File Download: /gbdb/hg19/geneHancer/geneHancerInteractionsDoubleElite.v2.hg19.bb
+             
+             df_GH <- read.delim(
+               file =  file.path(OUTPUT_FOLDER,
+                                 "results",
+                                 test,
+                                 folder_name,
+                                 "hgTables.txt"),
+               header = FALSE,
+               skip = 1,
+               col.names = colnames(significant_CpGs)[1:5]
+             )
+             
+             significant_CpGs$GeneAnnotation <- NA
+             significant_CpGs$EnhancerAnnotation <- NA
+             
+             for (r in 1:nrow(significant_CpGs)) {
+               # r <- 1
+               annotated_GH <-
+                 df_GH[significant_CpGs$chrom[r] == df_GH$chrom &
+                         df_GH$start <= significant_CpGs$start[r] &
+                         significant_CpGs$end[r] <= df_GH$end,]
+               # if any annotation found
+               if (nrow(annotated_GH) > 0) {
+                 # choose annotation with highest score
+                 annotation <-
+                   unlist(strsplit(annotated_GH$name[which.max(annotated_GH$score)], split = "/")) #annotated_GH$name[which.max(annotated_GH$score)]
+                 # get highest score
+                 significant_CpGs$score <-
+                   annotated_GH$score[which.max(annotated_GH$score)]
+                 significant_CpGs$GeneAnnotation[r] <- annotation[1]
+                 significant_CpGs$EnhancerAnnotation[r] <- annotation[2]
+               }
+             }
+             
+             print(paste("#of positive correlation CpGs : ",   nrow(significant_CpGs[significant_CpGs$pearson.statistic > 0 ,])))
+             
+             
+             print(paste("#of H3K27AC peaks : ", length(unique(
+               significant_CpGs$name
+             ))))
+             
+             print(paste("#of annotated enhancers : ", length(
+               unique(significant_CpGs$EnhancerAnnotation)
+             )))
+             print(paste("#of annotated genes : ", length(
+               unique(significant_CpGs$GeneAnnotation)
+             )))
+             
+             openxlsx::write.xlsx(
+               x = significant_CpGs,
+               file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 test,
+                 folder_name,
+                 "significant_CpGs.xlsx"
+               ),
+               sheetName = "significant_CpGS",
+               colNames = TRUE
+             )
+             
+             
+             write.csv2(
+               x = unique(significant_CpGs$GeneAnnotation[!is.na(significant_CpGs$GeneAnnotation)]),
+               file = file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 test,
+                 folder_name,
+                 paste(
+                   "unique.genes",
+                   min_delta,
+                   "delta.GH_Interactions",
+                   "p",
+                   p_significance_cut_off,
+                   "csv",
+                   sep = "."
+                 )
+               ),
+               quote = FALSE,
+               row.names = FALSE,
+               col.names = FALSE
+             )
+             
+             saveRDS(
+               object = significant_CpGs,
+               file = file.path(
+                 OUTPUT_FOLDER,
+                 "results",
+                 "pearson",
+                 folder_name,
+                 "significant_CpGs.rds"
+               )
+             )
+             
+             dir.create(
+               path = file.path(OUTPUT_FOLDER,
+                                "results",
+                                test,
+                                folder_name,
+                                "plots"),
+               showWarnings = FALSE
+             )
+             
+             
+             for (r in 1:nrow(significant_CpGs)) {
+               p <-
+                 plot_age_correlation(df_row = significant_CpGs[r,], typisation = real_age_typisation)
+               ggsave(
+                 plot = p,
+                 filename = file.path(
+                   OUTPUT_FOLDER,
+                   "results",
+                   test,
+                   folder_name,
+                   "plots",
+                   paste(
+                     significant_CpGs$GeneAnnotation[r],
+                     significant_CpGs$state[r],
+                     significant_CpGs$chrom[r],
+                     significant_CpGs$start[r],
+                     ".png",
+                     sep = "."
+                   )
+                 )
+               )
+             }
 }
 # https://maayanlab.cloud/Enrichr/enrich?dataset=47ed0059768b38095dca92d0748c5055
 
@@ -4112,19 +4546,19 @@ if (FALSE) {
 if (OTHER) {
   library(plotly)
   print("OTHER")
-  plot_age_correlation(df_row = df_peak_CpG_complete_with_test[5, ], typisation = real_age_typisation)
+  plot_age_correlation(df_row = df_peak_CpG_complete_with_test[5,], typisation = real_age_typisation)
   
-  plot_food_correlation(df_row = df_peak_CpG_complete_with_test[5, ], typisation = real_food_typisation)
+  plot_food_correlation(df_row = df_peak_CpG_complete_with_test[5,], typisation = real_food_typisation)
   
-  search_df[which.min(search_df$FDR),]
+  search_df[which.min(search_df$FDR), ]
   
   best_ex <-
     df_CpG[!is.na(df_CpG$KW_p_val) &
              df_CpG$type_delta > 0.25 &
-             df_CpG$KW_p_val < exp(-9.3),]
+             df_CpG$KW_p_val < exp(-9.3), ]
   
-  ex1 <- best_ex[1,]
-  ex2 <- best_ex[2,]
+  ex1 <- best_ex[1, ]
+  ex2 <- best_ex[2, ]
   
   
   df_plot <- data.frame(matrix(nrow = N_SAMPLES, ncol = 0))
@@ -4151,7 +4585,7 @@ if (OTHER) {
   
   
   df_CpG[!is.na(df_CpG$KW_p_val) &
-           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3),]
+           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3), ]
   
   # min_delta minus_log_alpha n_signfincant_CpG real_count   FDR
   #    0.08             6.4              93.6        300 0.312
@@ -4163,7 +4597,7 @@ if (OTHER) {
   # min_delta minus_log_alpha n_signfincant_CpG real_count   FDR
   #    0.25             9.3              0.17          2    0.085
   df_CpG[!is.na(df_CpG$KW_p_val) &
-           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3),]
+           df_CpG$type_delta > 0.25 & df_CpG$KW_p_val < exp(-9.3), ]
   
   saveRDS(
     object = df_empirical_means,
@@ -4220,7 +4654,7 @@ if (gene_annotation) {
   
   for (r in 1:length(unique(bed_for_meme$name))) {
     peak <- bed_for_meme$name[r]
-    temp <- best_CpGs[best_CpGs$name == peak,]
+    temp <- best_CpGs[best_CpGs$name == peak, ]
     
     bed_for_meme$start[r] <- min(temp$start) - add_nucleotides
     bed_for_meme$end[r] <- max(temp$start) + add_nucleotides
@@ -4230,7 +4664,7 @@ if (gene_annotation) {
   bed_for_meme$strand <- "."
   
   write.table(
-    x = bed_for_meme[,],
+    x = bed_for_meme[, ],
     file = file.path(
       OUTPUT_FOLDER,
       "results",
@@ -4276,7 +4710,7 @@ if (gene_annotation) {
     annotated_GH <-
       df_GH[best_CpGs$chrom[r] == df_GH$chrom &
               df_GH$start <= best_CpGs$start[r] &
-              best_CpGs$end[r] <= df_GH$end, ]
+              best_CpGs$end[r] <= df_GH$end,]
     # if any annotation found
     if (nrow(annotated_GH) > 0) {
       # choose annotation with highest score
@@ -4346,13 +4780,13 @@ if (plot_PCA) {
   
   
   meta37 <-
-    meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample), ]
+    meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample),]
   # truncate to only three groups
   # trauncate min delta pearson.delta
   data_meth <-
     df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= 0.39, as.character(real_food_typisation$sample)]
   #print("erase non complete rows")
-  data_meth <- data_meth[complete.cases(data_meth), ]
+  data_meth <- data_meth[complete.cases(data_meth),]
   data_meth <-
     t(data_meth)
   
@@ -4364,7 +4798,7 @@ if (plot_PCA) {
   pca_prcomp_res <-
     prcomp(x = data_meth_with_variance, scale = normalize_PCA)
   
-  pca_summery <- summary(pca_prcomp_res)$importance[2, ]
+  pca_summery <- summary(pca_prcomp_res)$importance[2,]
   
   saveRDS(object = pca_prcomp_res, file =  file.path(
     OUTPUT_FOLDER,
