@@ -7,14 +7,14 @@
 ##  output: pipeline
 ##
 ##
-##  v_01 29.11.2023
+##  v_c 21.03.2024
 ##  Author: Daniel Batyrev (HUJI 777634015)
 ##
 # Set up Work Environment --------------------------------------------------
 
 #Clear R working environment
 rm(list = ls())
-cluster <- FALSE
+cluster <- TRUE
 if (cluster) {
   this.dir <- "/ems/elsc-labs/meshorer-e/daniel.batyrev/HumanEvo/HumanEvo/"
   picuture_file_extension <- "pdf"
@@ -89,17 +89,13 @@ df_universal_annotation$color[df_universal_annotation$Group == "weak transcripti
 df_universal_annotation$color[df_universal_annotation$Group == "transcription"] <-
   "#008000"
 
-df_universal_annotation$Group[df_universal_annotation$Group == "quescient"] <-
-  "quiescent"
-df_universal_annotation$Group[df_universal_annotation$Group == "HET"] <-
-  "heterochromatin"
-
 state_names <-
   paste(
     df_universal_annotation$state_order_by_group,
     df_universal_annotation$`States  presented in paper`,
     sep = "_"
   )
+
 
 # matching_indices <- match(df_state_sample$state,paste(df_universal_annotation$state_order_by_group,df_universal_annotation$`States  presented in paper`,sep = "_"))
 # df_state_sample$state_color <- df_universal_annotation$color[matching_indices]
@@ -178,21 +174,20 @@ KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
 
 # set running parameters -------------------------------------------------------
 H3K27ac_Analysis <- FALSE
-compute_df_state_sample <- TRUE
-compute_df_state_group_sample <- TRUE
-compute_df_state <- TRUE
-compute_df_state_group <- TRUE
-compute_make_plots <- TRUE
 create_true_stat <- FALSE
 describe_Data <- FALSE
 create_permutations_horizonal_columns <- FALSE
 create_CpG_permutations_vertical <- FALSE
 summerize_CpG_columns_permutations <- FALSE
-summerize_horizonal_columns_permutations <- FALSE
-summerize_real_values <- FALSE
+
 histogramm_plots <- FALSE
 aggregate_CpG_results <- FALSE
-aggregate_horizontal_results <- FALSE
+
+summerize_horizonal_columns_permutations <- TRUE
+summerize_real_values <- TRUE
+aggregate_horizontal_results <- TRUE
+plot_landscape <- TRUE
+
 plot_kw_landscape <- FALSE
 pearson_landscape <- FALSE
 OTHER <- FALSE
@@ -201,7 +196,7 @@ plot_PCA <- FALSE
 DO_enrichment_analysis <- FALSE
 Genome_wide_Analysis <- FALSE
 state_dependen_analysis <- FALSE
-plot_landscape <- FALSE
+
 
 # load Data ---------------------------------------------------------------
 # load(".RData")
@@ -211,41 +206,6 @@ df_peak_CpG <-
   )
 
 # define functions ---------------------------------------------------------
-
-#' Load a Variable if Not Already Present in Workspace
-#'
-#' This function checks if a specified variable is already loaded in the global environment. 
-#' If the variable does not exist, it loads the variable from a specified RDS file. This function
-#' is particularly useful in managing workspace memory and ensuring data is loaded only when needed.
-#'
-#' @param variable_name The name of the variable as a string. This is the name of the variable
-#'   that will be checked and possibly loaded into the global environment.
-#' @param file_path The full file path to the RDS file where the variable data is stored. This path
-#'   must be correct and the file must exist; otherwise, an error will occur during the loading process.
-#'
-#' @return No explicit return value. The function works by side effect, loading a variable into the 
-#'   global environment if it does not already exist. Messages will be printed to indicate whether 
-#'   the variable was loaded or if it was already present.
-#'
-#' @examples
-#' # Define the path to your RDS file
-#' file_path <- "path/to/your/file.rds"
-#' # Define the variable name you want to check/load
-#' variable_name <- "desired_variable"
-#' # Call the function
-#' load_variable_if_not_exists(variable_name, file_path)
-#'
-#' @importFrom utils readRDS
-#' @export
-load_variable_if_not_exists <- function(variable_name, file_path) {
-  if (!exists(variable_name, where = .GlobalEnv)) {
-    assign(variable_name, readRDS(file_path), envir = .GlobalEnv)
-    message("Variable '", variable_name, "' has been loaded into the workspace.")
-  } else {
-    message("Variable '", variable_name, "' is already loaded in the workspace.")
-  }
-}
-
 
 # Function to pad numerical prefixes with leading zeros
 pad_with_zeros <- function(x) {
@@ -854,7 +814,6 @@ create_CpG_permution <- function(df, typisation) {
   return(list(data = df, permuation_order = permuation_order))
 }
 
-
 #' create a linear correlation plot meth vs age from row  in dataframe row
 #' @param df_row is a row in the CpG dataframe with
 #' columnnames like the typisation$sample
@@ -862,38 +821,29 @@ create_CpG_permution <- function(df, typisation) {
 #' @returns plot with linear correlation line meth cs age
 plot_age_correlation <- function(df_row, typisation) {
   df_plot <- typisation
-  df_plot$meth <- as.numeric(df_row[, as.character(typisation$sample)])
-  
-  # Fit a linear model to calculate R-squared
-  lm_model <- lm(meth ~ age_mean_BP, data = df_plot)
-  r_squared <- summary(lm_model)$r.squared  # Extract R-squared value
+  df_plot$meth <-
+    as.numeric(df_row[, as.character(typisation$sample)])
   
   p <- ggplot(data = df_plot, mapping = aes(x = age_mean_BP, y = meth)) +
     ggtitle(
-      label = paste(df_row$chrom, ":",df_row$start),  # Improved readability
-      subtitle = bquote(
-        "P-value:" ~ .(format.pval(df_row$pearson.p_val, digits = 3)) ~ 
-          ", " ~ italic(R)^2 ~ ":" ~ .(format(r_squared, digits = 3))  # Adding R-squared to subtitle
-      )
+      label = paste(df_row$chrom, df_row$start),  # Title with chromosome and start position
+      subtitle = bquote("p"["value"] == .(format.pval(df_row$pearson.p_val, digits = 3)))  # Subtitle with p-value in subscripts
     ) +
     geom_point(color = "#1f77b4", size = 3, alpha = 0.6) +
     geom_smooth(method = "lm", color = "#ff7f0e", se = FALSE, size = 1) +
-    xlim(0, 11000) +  
-    ylim(0, 1) +  
-    xlab("Sample age estimation (years BP)") +  # More concise label
-    ylab("CpG methylation level") +  # More specific label
-    scale_x_continuous(breaks = seq(0, 10000, by = 2000)) +  # Set x-axis ticks to match data range
+    xlim(0, 11000) +
+    ylim(0, 1) +
+    xlab("Sample Age Estimation in Years Before Present") +
+    ylab("CpG Methylation") +
+    scale_x_continuous(breaks = seq(0, 10000, by = 2000)) + # Setting x-axis ticks
     theme_minimal(base_size = 14) +
     theme(
       plot.title = element_text(size = 16, face = "bold"),
-      plot.subtitle = element_text(size = 14, color = "gray40"),  # Subtle color for subtitle
+      plot.subtitle = element_text(size = 14),
       axis.title.x = element_text(size = 14, face = "bold"),
       axis.title.y = element_text(size = 14, face = "bold"),
       axis.text.x = element_text(size = 12),
-      axis.text.y = element_text(size = 12),
-      panel.grid.minor = element_blank(),  # Reduce clutter from minor grid lines
-      panel.grid.major.x = element_line(color = "gray80"),  # Subtle major grid lines
-      panel.grid.major.y = element_line(color = "gray80")
+      axis.text.y = element_text(size = 12)
     )
   
   return(p)
@@ -910,41 +860,18 @@ plot_food_correlation <- function(df_row, typisation) {
   df_plot$meth <-
     as.numeric(df_row[, as.character(typisation$sample)])
   
-  # p <- ggplot(data = df_plot,
-  #             mapping = aes(x = Type, y = meth, color = Type)) +
-  #   ggtitle(
-  #     label = paste(df_row$chrom, df_row$start),
-  #     subtitle = paste("p_val: ", format.pval(df_row$kw.p_val))
-  #   ) +
-  #   geom_boxplot() +
-  #   geom_point(position = "jitter") +
-  #   ylim(0, 1) +
-  #   xlab("sample food Type") +
-  #   ylab("CpG methylation") +
-  #   scale_color_manual(values = setNames(mean_age_by_type$color, mean_age_by_type$Type))+
-  #   theme_minimal()
-
-  p <- ggplot(data = df_plot, mapping = aes(x = Type, y = meth, color = Type)) +
+  p <- ggplot(data = df_plot,
+              mapping = aes(x = Type, y = meth, color = Type)) +
     ggtitle(
       label = paste(df_row$chrom, df_row$start),
-      subtitle = paste("p_val:", signif(df_row$kw.p_val, digits=3))
+      subtitle = paste("p_val: ", format.pval(df_row$kw.p_val))
     ) +
-    geom_boxplot(outlier.shape = NA)  +
-    geom_point(position = position_jitter(width = 0.2), size = 3, alpha = 0.6) +
+    geom_boxplot() +
+    geom_point(position = "jitter") +
     ylim(0, 1) +
-    ylab("CpG Methylation") +
-    xlab("") +
-    scale_color_manual(values = setNames(mean_age_by_type$color, mean_age_by_type$Type)) +
-    theme_minimal(base_size = 14) +  # Increase base font size for better readability
-    theme(
-      plot.title = element_text(face = "bold", size = 16),
-      axis.title = element_text(size = 14),
-      axis.text = element_text(size = 12),
-      legend.title = element_blank(),  # Remove legend title
-      legend.text = element_text(size = 12),
-      legend.position = "right",
-      plot.subtitle = element_text(face = "italic")
-    )
+    xlab("sample food Type") +
+    ylab("CpG methylation") +
+    theme_minimal()
   return(p)
 }
 
@@ -952,11 +879,11 @@ plot_food_correlation <- function(df_row, typisation) {
 # H3K27ac Analysis --------------------------------------------------------
 
 if (H3K27ac_Analysis) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG.39.samples.merged.hg1",
-    file_path = "methylation+chip/all_CpG.39.samples.merged.hg19.rds"
-  )
+  # load entire methylome
+  all_CpG.39.samples.merged.hg19 <-
+    readRDS(
+      "methylation+chip/all_CpG.39.samples.merged.hg19.rds"
+    )
   
   # create results folder
   folder_name <- file.path(OUTPUT_FOLDER, "results", "H3K27ac")
@@ -1096,45 +1023,28 @@ if (H3K27ac_Analysis) {
       )
   )
   
-  # Figure S2
   
-  color_values <- unique(df_universal_annotation$color)
-  color_labels <- unique(df_universal_annotation$Group)
-  
-  # Set the first color to gray
-  color_values[1] <- "gray"
-  
-  change_indices <- which(c(TRUE, df_universal_annotation$color[-1] != df_universal_annotation$color[-length(df_universal_annotation$color)])) -1 
-  # Prepare a vector of labels, initially setting all to empty strings
-  labels <- rep("", length(df_universal_annotation$color))
-  # Set labels at change indices to the corresponding state or number, you can customize it further if needed
-  labels[change_indices+1] <- as.character(change_indices)
-  
-  
-  # Prepare the plot
-  p <- ggplot(data = all_CpG_states_hg19, aes(x = state, fill = state_color)) +
-    geom_bar(stat = "count", color = "black") +
-    theme(
-      axis.line = element_line(colour = "black"),
-      panel.background = element_blank(),
+  p <-
+    ggplot(data = all_CpG_states_hg19,
+           mapping = aes(x = state, fill = state_color)) +
+    geom_histogram(stat = "count", color = "black") +
+    ggplot2::theme(
+      axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
+      #legend.position = "none",
       axis.text.x = element_text(
-        angle = 45, vjust = 1, hjust = 1, size = 10, face = "bold"
-      ),
-      text = element_text(size = 14),  # Adjust size as needed
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      legend.text = element_text(face = "bold"),  # Make legend text bold
-      legend.title = element_blank()  # Remove the legend title
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
     ) +
     ylab("# of CpGs in chromatin state") +
-    xlab("") +  # Empty x-label as per your preference
+    xlab("chromatin state labeling") +
     scale_fill_manual(
-      values = color_values,
-      labels = color_labels
-    ) +
-    scale_x_discrete(
-      labels = labels)  # Labels from 0 to 99
-
+      values = unique(df_universal_annotation$color),
+      labels = unique(df_universal_annotation$Group)
+    )
+  
   
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
@@ -1143,8 +1053,8 @@ if (H3K27ac_Analysis) {
                          "all_CpG_states.png")
     ,
     plot = p,
-    width = 18,
-    height = 10
+    width = 10,
+    height = 6
   )
   
   
@@ -1252,30 +1162,31 @@ if (H3K27ac_Analysis) {
   #   ylab("% of CpGs covered by H3K27ac peaks in bone sample") +
   #   xlab("genome segment chromatin state labeling")
   
-  # Figure S6
-  
-  p <- ggplot(data = df_state, aes(x = state, y = n_H3K27AC / n_total * 100, fill = state_group)) +
+  p <-
+    ggplot(
+      data = df_state,
+      mapping = aes(
+        x = state,
+        y = n_H3K27AC / n_total * 100,
+        fill = state_group
+      )
+    ) +
     geom_bar(stat = "identity", color = "black") +
-    theme(
-      axis.line = element_line(colour = "black"),
-      panel.background = element_blank(),
-      axis.text.x = element_text(angle = 45, vjust = 0.5, hjust = 1, face = "bold"),  # X-axis labels bold
-      axis.text.y = element_text(face = "bold"),  # Y-axis labels bold
-      axis.title.x = element_text(face = "bold"),  # X-axis title bold
-      axis.title.y = element_text(face = "bold", size = 14),  # Y-axis title bold and potentially adjust size
-      legend.title = element_text(face = "bold"),  # Legend title bold
-      legend.text = element_text(face = "bold")  # Legend items text bold
+    ggplot2::theme(
+      axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
+      legend.position = "none",
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
     ) +
     ylim(0, 100) +
     ylab("% of CpGs in genome covered by H3K27ac") +
-    xlab("") +
-    scale_fill_manual(
-      values = color_values,
-      labels = color_labels
-    ) +
-    scale_x_discrete(
-      labels = labels)  # Labels from 0 to 99
-
+    xlab("state group") +
+    scale_fill_manual(values = unique(as.character(df_state$state_color)))
+  
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
                          "results",
@@ -1283,11 +1194,10 @@ if (H3K27ac_Analysis) {
                          "H3K27ac_coverage.png")
     ,
     plot = p,
-    width = 16,
-    height = 8
+    width = 10,
+    height = 6
   )
   
-  # Figure 2
   p <-
     ggplot(
       data = df_state_group,
@@ -1298,25 +1208,20 @@ if (H3K27ac_Analysis) {
       )
     ) +
     geom_bar(stat = "identity", color = "black") +
-    theme(
-      axis.line = element_line(colour = "black"),
-      panel.background = element_blank(),
+    ggplot2::theme(
+      axis.line = ggplot2::element_line(colour = "black"),
+      panel.background = ggplot2::element_blank(),
       legend.position = "none",
-      axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "bold", size = 12),  # Make x-axis text bold
-      axis.text.y = element_text(face = "bold", size = 12),  # Make y-axis text bold
-      axis.title.x = element_text(face = "bold", size = 14),  # Make x-axis title bold
-      axis.title.y = element_text(face = "bold", size = 14),  # Make y-axis title bold
-      plot.title = element_text(face = "bold", size = 16),  # If you have a title, make it bold
-      plot.subtitle = element_text(face = "bold"),  # If you have a subtitle, make it bold
-      text = element_text(face = "bold")  # Make all other text bold by default
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      )
     ) +
-    ylim(0, 40) +
-    ylab("% of CpGs covered by H3K27ac") +
-    xlab("") +
-    scale_fill_manual(values = unique(as.character(df_universal_annotation$color)))+
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))+
-    geom_hline(yintercept = 2.4, linetype = "dashed", color = "blue")
-  
+    ylim(0, 100) +
+    ylab("% of CpGs in genome covered by H3K27ac") +
+    xlab("state group") +
+    scale_fill_manual(values = unique(as.character(df_universal_annotation$color)))
   
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
@@ -1325,8 +1230,8 @@ if (H3K27ac_Analysis) {
                          "15_state_group_H3K27ac_coverage.png")
     ,
     plot = p,
-    width = 6,
-    height = 10
+    width = 10,
+    height = 6
   )
   
   print("# of CpG in Genome: ")
@@ -1431,7 +1336,7 @@ if (Genome_wide_Analysis) {
   }
   
 }
-# compute_all_CpG_complete_with_test -all_CpG_complete_with_test -----------------------------------------------------------------------
+# all_CpG_complete_with_test -all_CpG_complete_with_test -----------------------------------------------------------------------
 if (FALSE) {
   # compine all chr data to big df
   all_CpG_complete_with_test <- data.frame()
@@ -1473,18 +1378,7 @@ if (FALSE) {
   )
 }
 # df_state_sample  -----------------------------------------------------------------------
-if (compute_df_state_sample) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test", "rds", sep = ".")
-    )
-  )
-  
+if (FALSE) {
   #df_state_sample <- summary_df <- aggregate(. ~ state, data =  all_CpG_complete_with_test[,c("state",as.character(meta$sample))], FUN = mean)
   state_summery_column_names <-
     c(
@@ -1574,18 +1468,7 @@ if (compute_df_state_sample) {
   )
 }
 # df_state_group_sample  -----------------------------------------------------------------------
-if (compute_df_state_group_sample) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test", "rds", sep = ".")
-    )
-  )
-  
+if (FALSE) {
   state_group_sample_summery_column_names <-
     c(
       "state_group",
@@ -1669,18 +1552,7 @@ if (compute_df_state_group_sample) {
   )
 }
 # df_state  -----------------------------------------------------------------------
-if (compute_df_state) {
-  
-    load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test", "rds", sep = ".")
-    )
-  )
-  
+if (FALSE) {
   state_column_names <-
     c(
       "state",
@@ -1759,8 +1631,8 @@ if (compute_df_state) {
     factor(df_universal_annotation$color[matching_indices],
            levels = unique(df_universal_annotation$color))
   df_state$state_group <-
-    factor(df_universal_annotation$Group[matching_indices],
-           levels = unique(df_universal_annotation$Group))
+    factor(df_state_sample$state_group[matching_indices],
+           levels = unique(df_state_sample$state_group))
   
   df_state$p_val_test_all_methylation_KW <- NA
   
@@ -1792,18 +1664,7 @@ if (compute_df_state) {
   )
 }
 # df_state_group  -----------------------------------------------------------------------
-if (compute_df_state_group) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test", "rds", sep = ".")
-    )
-  )
-  
+if (FALSE) {
   state_group_column_names <-
     c(
       "state_group",
@@ -1873,101 +1734,53 @@ if (compute_df_state_group) {
     )
   )
 }
+
 # make_plots  -----------------------------------------------------------------------
-if (compute_make_plots) {
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test", "rds", sep = ".")
-    )
-  )
-  
-  load_variable_if_not_exists(
-    variable_name = "df_state_sample",
-    file_path = "12.pipeline/results/WholeGenome/df_state_sample.rds"
-  )
-  
-  load_variable_if_not_exists(
-    variable_name = "df_state",
-    file_path = "12.pipeline/results/WholeGenome/df_state.rds"
-  )
-  
-  load_variable_if_not_exists(
-    variable_name = "df_state_group",
-    file_path = "12.pipeline/results/WholeGenome/df_state_group.rds"
-  )
-  
-  load_variable_if_not_exists(
-    variable_name = "df_state_group_sample",
-    file_path = "12.pipeline/results/WholeGenome/df_state_group_sample.rds"
-  )
-  
+if (FALSE) {
+  # all_CpG_complete_with_test <- readRDS("12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds")
+  # df_state_sample <- readRDS("12.pipeline/results/WholeGenome/df_state_sample.rds")
+  # df_state <- readRDS("12.pipeline/results/WholeGenome/df_state.rds")
+  # df_state_group <- readRDS("12.pipeline/results/WholeGenome/df_state_group.rds")
   # # Convert your dataframe to a data.table
+  #
+  #
   # # Melt the dataframe
   # all_CpG_meth <- data.table::melt(data = meth, id.vars = NULL, variable.name = "sample", value.name = "methylation")
-
+  
   
   library(grid)
 # create rectanlges 
     muh_grob <- grid::rectGrob(
     x=1:(length(unique(df_universal_annotation$Group))-1), y=0, gp=gpar(
-      color='black', fill=unique(df_universal_annotation$color)[-1], alpha=1))
+      color='black', fill=unique(df_universal_annotation$color)[-1], alpha=0.2))
   
 
-  # p <- ggplot(data = df_state_group_sample[! as.character(df_state_group_sample$state_group) == "others", ],
-  #        mapping = aes(x = state_group,y = mean_methylation,color = type))+
-  #   geom_point(position = "jitter",size = 1)+
-  #   theme_classic()+
-  #   theme(
-  #     axis.text.x = element_text(
-  #       angle = 90,
-  #       vjust = 0.5,
-  #       hjust = 1
-  #     ))+
-  #   coord_cartesian(clip='off')+
-  #   annotation_custom(
-  #     grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.16, ymax=0.15
-  #   )+
-  #   labs(x=NULL,y="mean sample methylation")+
-  #   scale_color_discrete(name = "lifestyle/diet")+
-  #   theme(
-  #     text = element_text(size = 14)  # Adjust size as needed
-  #   )
-    p <- ggplot(data = df_state_group_sample[! as.character(df_state_group_sample$state_group) == "others", ],
-                mapping = aes(x = state_group,y = mean_methylation,color = type))+
-      geom_point(position = position_jitter(width = 0.2, height = 0), size = 1, alpha = 0.8)+
-    theme_classic(base_size = 14)+
-      theme(
-        axis.text.x = element_text(
-          angle = 90,
-          vjust = 0.5,
-          hjust = 1,
-          face = "bold"
-        ))+
-      coord_cartesian(clip='off')+
-      annotation_custom(
-        grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.16, ymax=0.15
-      )+
-      labs(x=NULL,y="mean sample methylation")+
-      scale_color_discrete(name = "lifestyle/diet")+
-      theme(
-        text = element_text(size = 14),  # Adjust size as needed
-        axis.text = element_text(face = "bold"),  # Make all axis text bold
-        axis.title = element_text(face = "bold"),  # Make axis titles bold
-        legend.text = element_text(face = "bold")  # Make legend text bold
-      )+
-      scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
+  p <- ggplot(data = df_state_group_sample[! as.character(df_state_group_sample$state_group) == "others", ],
+         mapping = aes(x = state_group,y = mean_methylation,color = type))+
+    geom_point(position = "jitter",size = 1)+
+    theme_classic()+
+    theme(
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      ))+
+    coord_cartesian(clip='off')+
+    annotation_custom(
+      grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.16, ymax=0.15
+    )+
+    labs(x=NULL,y="mean sample methylation")+
+    scale_color_discrete(name = "lifestyle/diet")+
+    theme(
+      text = element_text(size = 14)  # Adjust size as needed
+    )
   
   ggsave(filename = file.path(
     OUTPUT_FOLDER,
     "results",
     "WholeGenome",
-    paste("mean_methylation_per_in_groupV2", "png", sep = ".")
-  ),plot = p,width = 9,height = 8.7)
+    paste("mean_methylation_per_in_group", "png", sep = ".")
+  ),plot = p,width = 8,height = 8)
   
   df_plot_no_arf <-
     all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
@@ -1992,15 +1805,7 @@ if (compute_make_plots) {
       )) +
     ylab(bquote(""  ~ delta[meth])) +
     xlab("chromatin state labeling") +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])+
-    theme(
-      text = element_text(size = 14),  # Adjust size as needed
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      legend.text = element_text(face = "bold")  # Make legend text bold
-    )+
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
+    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   
   ggsave(
     filename = file.path(
@@ -2038,15 +1843,7 @@ if (compute_make_plots) {
     ylab(bquote(""  ~ -log(p_[value]))) +
     xlab("chromatin state labeling") +
     ylim(0, 5) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])+
-    theme(
-      text = element_text(size = 14),  # Adjust size as needed
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      legend.text = element_text(face = "bold")  # Make legend text bold
-    )+
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
+    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   
   ggsave(
     filename = file.path(
@@ -2082,15 +1879,7 @@ if (compute_make_plots) {
     ylab(bquote(""  ~ -log(p_[value]))) +
     xlab("chromatin state labeling") +
     ylim(0, 5) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])+
-    theme(
-      text = element_text(size = 14),  # Adjust size as needed
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      legend.text = element_text(face = "bold")  # Make legend text bold
-    )+
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
+    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   
   
   ggplot(data = df_plot_no_arf,
@@ -2113,15 +1902,7 @@ if (compute_make_plots) {
     ylab(bquote(""  ~ -log(p_[value]))) +
     xlab("chromatin state labeling") +
     ylim(0, 5) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])+
-    theme(
-      text = element_text(size = 14),  # Adjust size as needed
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      legend.text = element_text(face = "bold")  # Make legend text bold
-    )+
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
+    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
   
   # ggsave(filename = file.path(
   #   OUTPUT_FOLDER,
@@ -2130,15 +1911,10 @@ if (compute_make_plots) {
   #   paste("methylation_WG_complete_with_test", "png", sep = "."))
   #   ,plot = p,width = 36,height = 12)
   
-  index <- !grepl(pattern = "GapArtf",
-                  x = df_state_sample$state,
-                  ignore.case = TRUE)
-    df_plot <-
-    df_state_sample[index, ]
-  
-  muh_grob <- grid::rectGrob(
-    x=1:length(unique(df_plot$state)), y=0, gp=gpar(
-      color='black', fill=as.character(df_state$state_color[df_state$state %in% df_plot$state]), alpha=1))
+  df_plot <-
+    df_state_sample[!grepl(pattern = "GapArtf",
+                           x = df_state_sample$state,
+                           ignore.case = TRUE), ]
   
   fill_vec <-
     df_universal_annotation$color[(100 - length(unique(df_plot$state))):length(unique(df_plot$state))]
@@ -2147,55 +1923,37 @@ if (compute_make_plots) {
     ggplot(data = df_plot ,
            mapping = aes(x = state, y = mean_methylation)) +
     #geom_boxplot(outlier.shape = NA)+
-    geom_point(position = position_jitter(width = 0.2, height = 0),size = 1, alpha = 0.7, mapping = aes(color = type)) +
+    geom_point(position = "jitter", mapping = aes(color = type)) +
     ggplot2::theme(
-      axis.text.x = element_blank(),
-      # axis.text.x = element_text(
-      #   angle = 90,
-      #   vjust = 0.5,
-      #   hjust = 1,
-      #   face = "bold"
-      # ),
-      axis.text.y = element_text(face = "bold"),
-      axis.title.y = element_text(size = 14, face = "bold"),
-      panel.background = ggplot2::element_blank(),
-      axis.ticks.x = element_blank()
+      axis.text.x = element_text(
+        angle = 90,
+        vjust = 0.5,
+        hjust = 1
+      ),
+      panel.background = ggplot2::element_blank()
     ) +
     ylab("mean sample methylation") +
-    #xlab("chromatin state labeling")+
-    annotation_custom(
-      grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.05, ymax=0.1
-    )+xlab("")+
-    coord_cartesian(clip='off')
+    xlab("chromatin state labeling") #+
+  # annotation_custom(
+  #   grob=muh_grob, xmin = 0, xmax = 1, ymin = -0.5, ymax=0.1
+  # )
   
-
-  # Assuming df_plot and muh_grob are already defined
-  p <- ggplot(data = df_plot, aes(x = state, y = mean_methylation)) +
-    geom_point(position = position_jitter(width = 0.2, height = 0), size = 0.8, alpha = 0.7, aes(color = type)) +
-    theme(
-      axis.text.x = element_blank(),  # Hide default x-axis text
-      axis.text.y = element_text(face = "bold"),
-      axis.title.y = element_text(size = 14, face = "bold"),
-      panel.background = element_blank(),
-      axis.ticks.x = element_blank()  # Hide default x-axis ticks
-    ) +
-    labs(y = "mean sample methylation", x = "") +
-    annotation_custom(grob = muh_grob, xmin = 0, xmax = 1, ymin = -0.2, ymax = 0.2) +
-    coord_cartesian(clip = 'off') +
-    geom_text(aes(label = state), y = -0.001, vjust = 0.5,hjust = 1, size = 2,angle = 90)+  # Manually add x-axis labels
-    theme(legend.position="none")
   
+  
+  # +
+  #   scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
+  #
   ggsave(
     filename = file.path(
       OUTPUT_FOLDER,
       "results",
       "WholeGenome",
-      paste("100methylation_WG_complete_with_test", "png", sep = ".")
+      paste("methylation_WG_complete_with_test", "png", sep = ".")
     )
     ,
     plot = p,
-    width = 17,
-    height = 7
+    width = 24,
+    height = 12
   )
   
   
@@ -2236,12 +1994,12 @@ if (compute_make_plots) {
     height = 12
   )
   
-  p <-
+  p_enrichment <-
     ggplot(data = df_state,
            mapping = aes(
              x = state,
              y = n_H3K27AC / expected,
-             fill = state_group
+             fill = state
            )) +
     geom_bar(stat = "identity") +
     ggplot2::theme(
@@ -2264,7 +2022,7 @@ if (compute_make_plots) {
       paste("p_enrichment_WG_complete_with_test", "png", sep = ".")
     )
     ,
-    plot = p,
+    plot = p_enrichment,
     width = 36,
     height = 12
   )
@@ -2434,7 +2192,7 @@ if (compute_make_plots) {
       "results",
       "WholeGenome",
       "plots",
-      paste("100pie_chart H3K27Ac", "png", sep = ".")
+      paste("pie_chart H3K27Ac", "png", sep = ".")
     )
     ,
     plot = p,
@@ -2496,9 +2254,7 @@ if (compute_make_plots) {
                #geom_boxplot()+
                geom_point(mapping = aes(color = state_group))
              
-  
              
-  #ggplot(data = df_state_group,mapping = aes(x = ))           
              
 }
 
@@ -2552,7 +2308,7 @@ if (state_dependen_analysis) {
                                                      paste("pearson", state, "rds", sep = ".")))
     
     file_names <- list.files(path = folder_path,
-                             pattern = paste("pearson", state, "rds", sep = "."))
+                             pattern = paste("^pearson", state, "rds", sep = "."))
     
     state_results <-
       parallel_summerize_permutations(sim_file_names = file.path(folder_path, file_names))
@@ -2597,7 +2353,7 @@ if (state_dependen_analysis) {
             paste("summery", "pearson", "all", "states", "rds", sep = ".")
           ))
   
-  #summery_all_state_results <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/analysis_by_state/summery.pearson.all.states.rds")
+  
   
   summery_all_state_results_wide <-
     pivot_wider(data = summery_all_state_results,
@@ -2609,7 +2365,7 @@ if (state_dependen_analysis) {
     (summery_all_state_results_wide$negative_signfincant_CpG) / (dummy_value + summery_all_state_results_wide$positive_signfincant_CpG)
   
   alpha <- 8
-  min_delta <- 0.5
+  min_delta <- 0.3
   ggplot(
     data =  summery_all_state_results_wide[summery_all_state_results_wide$min_delta == min_delta &
                                              summery_all_state_results_wide$minus_log_alpha >= 6, ],
@@ -2680,7 +2436,7 @@ if (state_dependen_analysis) {
     ) +
     coord_cartesian(clip = "off") +
     ylab(expression(
-      paste("fraction of significant CpG ", p[value] <= e ^ (-8), ", ", delta[meth] >= 0.5)
+      paste("fraction of significant CpG ", p[value] <= e ^ (-8), ", ", delta[meth] >= 0.3)
     )) +
     xlab("chromatin state labeling")
   
@@ -2724,16 +2480,13 @@ if (state_dependen_analysis) {
 }
 # genome wide only delta good states --------------------------------------------------
 if (FALSE) {
-  min_delta <- 0.5
+  min_delta <- 0.3
   max_p <- 0.001
   genome_CpG_data_hg19 <-
     all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
                                       x = all_CpG_complete_with_test$state,
                                       ignore.case = TRUE) &
                                  all_CpG_complete_with_test$pearson.delta >= min_delta,]
-  
-  counts_min_delta_by_state_group <- genome_CpG_data_hg19 %>%
-    count(state_group) 
   
   counts_min_delta <- genome_CpG_data_hg19 %>%
     count(state)
@@ -2761,164 +2514,12 @@ if (FALSE) {
     )
   
   counts_sig_min_delta_slope <- significant_genome_CpG_data_hg19 %>%
-    mutate(
-      state = factor(state),  # Convert to factor if not already
-      slope = factor(slope)   # Convert to factor ensuring all possible slopes are levels
-    ) %>%
-    group_by(state, slope) %>%
-    count() %>%
-    ungroup() %>%
-    complete(state, slope, fill = list(n = 0))  # Fill missing combinations with zero counts
+    group_by(state) %>%
+    count(slope)
   
   counts_sig_min_delta_slope_by_state_group <- significant_genome_CpG_data_hg19 %>%
     group_by(state_group) %>%
     count(slope)
-  
-  counts_sig_min_delta_slope_by_state_group <- counts_sig_min_delta_slope_by_state_group %>%
-    left_join(counts_min_delta_by_state_group, by = "state_group", suffix = c("", "_total"))
-  
-  counts_sig_min_delta_by_state_group <- significant_genome_CpG_data_hg19 %>%
-    count(state_group)
-  counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
-    left_join(counts_min_delta_by_state_group,by = "state_group", suffix = c("", "_total"))
-  counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
-    mutate(proportion = n / n_total)
-  counts_sig_min_delta_by_state_group$state_color <- unique(df_universal_annotation$color)[-1]
-  
-  
-  # change HET to heterochromatin etc. 
-  counts_sig_min_delta_by_state_group$state_group <- ifelse(
-      counts_sig_min_delta_by_state_group$state_group  == "quescient",
-      "quiescent",
-      ifelse(
-        counts_sig_min_delta_by_state_group$state_group  == "HET",
-        "heterochromatin",
-        as.character(counts_sig_min_delta_by_state_group$state_group)
-      )
-    )
-  
-  # Prepare the data for the Chi-square test
-  observed <- with(counts_sig_min_delta_by_state_group, data.frame(
-    significant = n,
-    not_significant = n_total - n
-  ))
-  
-  # Conduct the Chi-square test
-  chi_test_result <- chisq.test(observed)
-  
-  # Print the results
-  print(chi_test_result)
-  
-  
-  # goodnwes of fit test
-  
-  # Assuming counts_sig_min_delta_by_state_group is already defined with columns n and n_total
-  
-  # Calculate total observed significant CpGs
-  total_observed <- sum(counts_sig_min_delta_by_state_group$n)
-  
-  # Total number of CpGs across all groups
-  total_groups <- sum(counts_sig_min_delta_by_state_group$n_total)
-  
-  # Expected uniform proportion
-  expected_uniform_proportion <- total_observed / total_groups
-  
-  # Assuming a uniform distribution, calculate expected count for each group
-  counts_sig_min_delta_by_state_group$expected <- 
-    (total_observed / total_groups) * counts_sig_min_delta_by_state_group$n_total
-  
-  # Perform the Chi-square Goodness-of-Fit test for the entire dataset
-  observed_counts <- counts_sig_min_delta_by_state_group$n
-  expected_counts <- counts_sig_min_delta_by_state_group$expected
-  
-  # Correcting the usage of chisq.test for goodness-of-fit rather than test of independence
-  chi_test_result <- chisq.test(x = observed_counts, p = expected_counts / sum(expected_counts), rescale.p = TRUE)
-  
-  # Obtain standardized residuals
-  counts_sig_min_delta_by_state_group$stdres <- chi_test_result$stdres
-  
-  # Convert standardized residuals to approximate p-values
-  counts_sig_min_delta_by_state_group$p_value_from_residuals <- 2 * pnorm(abs(counts_sig_min_delta_by_state_group$stdres), lower.tail = FALSE)
-  
-  # Adjusting for multiple testing using Bonferroni correction
-  counts_sig_min_delta_by_state_group$p_value_adjusted <- p.adjust(counts_sig_min_delta_by_state_group$p_value_from_residuals, method = "bonferroni")
-  
-  # Update significance column to include significance only for positive residuals
-  counts_sig_min_delta_by_state_group$significance <-
-    ifelse(
-      counts_sig_min_delta_by_state_group$stdres > 0,
-      ifelse(
-        counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.001,
-        '***',
-        ifelse(
-          counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.01,
-          '**',
-          ifelse(
-            counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.05,
-            '*',
-            ''
-          )
-        )
-      ),
-      ''
-    )
-  
-  ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
-    geom_col() + # Use geom_col for pre-calculated values
-    geom_text(aes(label = significance, y = proportion + 0.0005), position = position_dodge(width = 0.9), vjust = -0.5, check_overlap = TRUE) +
-    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotate X labels for readability
-    labs(
-      x = "",
-      y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta >= 0.5),
-      fill = "State Group"
-    ) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
-  
-#Figure 2C
-  
-  p <- ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
-    geom_col(color = "black", show.legend = FALSE) +  # Use geom_col for pre-calculated values and hide legend
-    geom_text(
-      aes(label = significance, y = proportion + 0.001),
-      position = position_dodge(width = 0.9),
-      vjust = -0.5, size = 6,  # Increased size for better visibility
-      fontface = "bold",  # Make in-plot text bold
-      check_overlap = TRUE
-    ) +
-    geom_hline(yintercept = expected_uniform_proportion, linetype = "dashed", color = "blue", size = 1) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1]) +  # Apply your color palette
-    labs(
-      x = NULL,  # Removing the x-axis label for clarity
-      y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta >= 0.5)
-    ) +
-    theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
-    theme(
-      axis.text = element_text(face = "bold"),  # Make all axis text bold
-      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Adjusting x-axis labels for readability
-      axis.title = element_text(face = "bold"),  # Make axis titles bold
-      plot.title = element_text(face = "bold"),  # Make plot title bold
-      plot.subtitle = element_text(face = "bold"),  # Make plot subtitle bold
-      legend.title = element_text(face = "bold"),  # Make legend title bold
-      legend.text = element_text(face = "bold"),  # Make legend text bold
-      panel.grid.major = element_blank(),  # Clean background without major grid lines
-      panel.grid.minor = element_blank(),  # Clean background without minor grid lines
-      legend.position = "none"  # Removing the legend to reduce clutter
-    ) +
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  
-  ggsave(
-    filename = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      "plots",
-      paste("fraction significant CpG per state group", "png", sep = ".")
-    )
-    ,
-    plot = p,
-    width = 10,
-    height = 8
-  )
   
   
   counts_sig_min_delta_slope$total <-
@@ -2989,7 +2590,7 @@ if (FALSE) {
   # )+
   #coord_cartesian(clip = "off")+
   ylab(expression(
-    paste("fraction of significant CpG ", p[value] <= 0.001, ", ", delta[meth] >= 0.5)
+    paste("fraction of significant CpG ", p[value] <= 0.001, ", ", delta[meth] >= 0.3)
   )) +
     xlab("chromatin state labeling") +
     scale_fill_manual(values = unique(df_universal_annotation$color))
@@ -3076,8 +2677,9 @@ if (FALSE) {
   #     text = element_text(size = 14)  # Adjust size as needed
   #   )
    
-  # Figure S4
-  
+    
+    
+    
   p <- ggplot(
     data = summary_df_wide,
     mapping = aes(
@@ -3088,22 +2690,28 @@ if (FALSE) {
     )
   ) +
     geom_bar(stat = "identity", colour = "black") +
+    geom_text(
+      position = position_stack(vjust = 0.5),
+      size = 6,
+      mapping = aes(y = 3)
+    ) +
     theme(
       panel.background = element_blank(),
-      axis.text.x = element_text(size = 14, face = "bold"),
-      axis.text.y = element_text(size = 16, face = "bold"),
+      axis.text.x = element_text(size = 14),
+      axis.text.y = element_text(size = 16),
       axis.line = element_line(color = "black", size = 1),
       axis.ticks = element_line(color = "black", size = 0.5),
-      axis.title.x = element_text(size = 16, face = "bold"),
-      axis.title.y = element_blank(),  # If you want to show the y-axis title in bold, remove this line
-      text = element_text(face = "bold")  # This makes all text bold by default, including legend text
+      axis.title.y=element_blank(),
+      axis.title.x=element_text(size = 16)
+      
     ) +
     ylab(expression(paste(
       log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.5
     ))) +
+    #xlab("Chromatin state groups") +
     scale_fill_manual(values = unique(df_universal_annotation$color)[-1]) +
     coord_flip() +
-    scale_y_continuous(expand = c(0, 0))
+    scale_y_continuous(expand = c(0, 0)) # Adjust y-axis expansion here
   
   ggsave(
     filename = file.path(
@@ -3111,12 +2719,12 @@ if (FALSE) {
       "results",
       "WholeGenome",
       paste("enrichment significant CpG per Group", "png", sep = ".")
-    ),
+    )
+    ,
     plot = p,
     width = 12,
     height = 12
   )
-  
       
       
       summary_df_state <-
@@ -3135,31 +2743,29 @@ if (FALSE) {
           x = state,
           y = log_fraction,
           fill = state_group,
-          #label = paste("Negative:", negative_count, " ; Positive:", positive_count)
+          label = paste("Negative:", negative_count, " ; Positive:", positive_count)
         )
       ) +
         geom_bar(stat = "identity", colour = "black") +
-        # geom_text(
-        #   position = position_stack(vjust = 0.5),
-        #   size = 3,
-        #   mapping = aes(y  =  max(summary_df_state$log_fraction))
-        # ) +  # Add text annotations
-          theme(
-            panel.background = element_blank(),
-            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "bold", size = 12),
-            axis.text.y = element_text(face = "bold", size = 12),
-            axis.title.x = element_text(face = "bold", size = 14),
-            axis.title.y = element_text(face = "bold", size = 14),
-            legend.text = element_text(face = "bold"),
-            legend.title = element_text(face = "bold"),
-            text = element_text(face = "bold")
-          )+
+        geom_text(
+          position = position_stack(vjust = 0.5),
+          size = 3,
+          mapping = aes(y  =  max(summary_df_state$log_fraction))
+        ) +  # Add text annotations
+        ggplot2::theme(
+          panel.background = ggplot2::element_blank(),
+          # axis.text.x = element_text(
+          #   angle = 90,
+          #   vjust = 0.5,
+          #   hjust = 1
+          # )
+          ) +
           ylab(expression(
-            paste(log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.5)
+            paste(log(negative[correlation] / positive[correlation]), " ", p[value] <= 0.001, ", ", delta[meth] >= 0.3)
           )) +
-            xlab("") +
-        scale_fill_manual(values = unique(as.character(summary_df_state$state_color)))#     +
-        # scale_x_discrete(labels = gsub(pattern = "_.*",replacement = "",x = summary_df_state$state))
+            xlab("Chromatin state groups") +
+            scale_fill_manual(values = unique(df_universal_annotation$color)) +
+            coord_flip()
           
           ggsave(
             filename = file.path(
@@ -3170,21 +2776,9 @@ if (FALSE) {
             )
             ,
             plot = p,
-            width = 18,
-            height = 9
+            width = 12,
+            height = 12
           )
-          
-          openxlsx::write.xlsx(
-            x = summary_df_state,
-            file.path(
-              OUTPUT_FOLDER,
-              "results",
-              "genome_wide_tests.xlsx"
-            ),
-            sheetName = paste("pearson <= " ,max_p, " delta >=",min_delta ),
-            colNames = TRUE
-          )
-          
 }
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
@@ -3567,64 +3161,43 @@ if (describe_Data) {
     sum(df_peak_CpG_complete_with_test$pearson.delta >= min_delta)
   )
   
-  # p <-
-  #   ggplot(data = meta,
-  #          mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
-  #   geom_point() +
-  #   geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP +
-  #                       age_std_BP),
-  #                 width = .1) +
-  #   theme_minimal() +
-  #   theme(axis.text.x = element_text(
-  #     angle = 0,
-  #     vjust = 0.5,
-  #     hjust = 1
-  #   )) +
-  #   scale_y_continuous(
-  #     breaks = seq(0, 11000, by = 1000),
-  #     # labels = rep("",13),
-  #     limits = c(0, 11500),
-  #     expand = c(0, 0)
-  #   ) +
-  #   ylab("years before present (B.P.)") +
-  #   xlab("sample ID") +
-  #   scale_color_discrete(name = "lifestyle/diet") +
-  #   theme(
-  #     strip.text.x = element_blank(),
-  #     strip.background = element_rect(colour = "white", fill = "white"),
-  #     legend.position = c(.9, .4)
-  #   ) +
-  #   coord_flip()
   
-  p <- ggplot(data = plot_meta, mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
-    geom_point(size = 3, alpha = 0.6) +  # Enhanced points for better visibility
-    geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP + age_std_BP),
-                  width = 0.1, size = 0.5) +  # Adjusted error bars for clarity
-    theme_minimal(base_size = 14) +  # Base size for readability
-    theme(
-      axis.text.x = element_text(vjust = 1, hjust = 1),  # Adjusting x-axis labels for better readability
-      legend.position = c(.9, .4),
-      legend.title = element_text(face = "bold"),  # Bold legend title for emphasis
-      plot.title = element_text(size = 16, face = "bold"),  # Enhanced plot title
-      axis.title.x = element_text(size = 14, face = "bold"),  # Bold and larger x-axis label
-      axis.title.y = element_text(size = 14, face = "bold")  # Bold and larger y-axis label
-    ) +
+  p <-
+    ggplot(data = meta,
+           mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
+    geom_point() +
+    geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP +
+                        age_std_BP),
+                  width = .1) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(
+      angle = 0,
+      vjust = 0.5,
+      hjust = 1
+    )) +
     scale_y_continuous(
-      breaks = seq(0, 11000, by = 1000),  # Adjusted breaks for y-axis
+      breaks = seq(0, 11000, by = 1000),
+      # labels = rep("",13),
       limits = c(0, 11500),
       expand = c(0, 0)
     ) +
-    ylab("Years Before Present (B.P.)") +
-    xlab("Sample ID") +
-    scale_color_discrete(name = "Lifestyle/Diet") +  # Clarified legend title
-    coord_flip()  # Flipping coordinates for horizontal layout
+    ylab("years before present (B.P.)") +
+    xlab("sample ID") +
+    scale_color_discrete(name = "lifestyle/diet") +
+    theme(
+      strip.text.x = element_blank(),
+      strip.background = element_rect(colour = "white", fill = "white"),
+      legend.position = c(.9, .4)
+    ) +
+    coord_flip()
+  
   
   ggsave(
     filename = file.path(OUTPUT_FOLDER,
                          "plots",
                          "Age of samples.png"),
     plot = p,
-    width = 12,
+    width = 8,
     height = 8
   )
   #position_nudge(x = -2)
@@ -3777,9 +3350,7 @@ if (describe_Data) {
       panel.background = element_blank(),
       axis.text.y = element_blank(),
       axis.ticks.y = element_blank(),
-      axis.title.y = element_blank(),
-      axis.title.x = element_text(size = 14, face = "bold"),
-      axis.text.x = element_text(size = 12)
+      axis.title.y = element_blank()
     ) + xlab("years before present (B.P.)") +
     scale_fill_manual(name = "lifestyle/diet",
                       values = mean_age_by_type$color,
@@ -3802,7 +3373,7 @@ if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
   dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 50
+  n_repetitions <- 100
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -3859,13 +3430,9 @@ if (create_permutations_horizonal_columns) {
 
 if (create_CpG_permutations_vertical) {
   print("create_CpG_permutations_vertical")
-  dir.create(path = file.path(OUTPUT_FOLDER, paste("pearson","CpG_permutation",sep = ".")),
+  dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
              showWarnings = FALSE)
-  
-  dir.create(path = file.path(OUTPUT_FOLDER, paste("KW","CpG_permutation",sep = ".")),
-             showWarnings = FALSE)
-  
-  n_repetitions <- 50
+  n_repetitions <- 100
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -3902,7 +3469,7 @@ if (create_CpG_permutations_vertical) {
             sep = ".")
     saveRDS(
       object = permutation_age,
-      file = file.path(OUTPUT_FOLDER, paste("pearson","CpG_permutation",sep = "."), sim_age_file_name)
+      file = file.path(OUTPUT_FOLDER, "simulation", sim_age_file_name)
     )
     
     # save food permutation
@@ -3914,7 +3481,7 @@ if (create_CpG_permutations_vertical) {
             sep = ".")
     saveRDS(
       object = permutation_food,
-      file = file.path(OUTPUT_FOLDER, paste("KW","CpG_permutation",sep = "."), sim_food_file_name)
+      file = file.path(OUTPUT_FOLDER, "simulation", sim_food_file_name)
     )
     
     end_time <- Sys.time()
@@ -3928,27 +3495,18 @@ if (summerize_CpG_columns_permutations) {
   print("summerize_CpG_columns_permutations")
   # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
   
-  test <- "pearson"
-  #test <- "KW"
-  
   file_names <-
-    list.files(
-      path = file.path(OUTPUT_FOLDER, paste(test,"CpG_permutation",sep = ".")),
-      pattern = paste(test, "*.CpG_permutation.*", sep = ".")
-    )
-  print(length(file_names))
-  
-  #print(file.path(OUTPUT_FOLDER, paste(test,"CpG_permutation",sep = "."), file_names))
-  
+    list.files(path = file.path(OUTPUT_FOLDER, "simulation"),
+               pattern = "*.CpG_permutation.*")
   start_time <- Sys.time()
   sim_results <-
-    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, paste(test,"CpG_permutation",sep = "."), file_names))
+    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
   end_time <- Sys.time()
   print(end_time - start_time)
   
   saveRDS(
     object = sim_results,
-    file = file.path(OUTPUT_FOLDER, paste(test,"CpG_permutation.sim_results.rds",sep="."))
+    file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results.rds")
   )
   
   start_time <- Sys.time()
@@ -3976,15 +3534,16 @@ if (histogramm_plots) {
   cut_off <- 6
   alpha_p <- 9.3
   
-  sim_results_pearson_CpG <-
-    readRDS(
-      "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/pearson.CpG_permutation.sim_results.cluster.rds"
-    )
-  
+  #real_results <- readRDS("12.pipeline/real_results.rds")
+  sim_results <-
+    readRDS(file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results2023.rds"))
   sim_results_pearson_horizontal <-
-    readRDS(
-      "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/pearson.horizontal.sim_results_cluster.rds"
-    )
+    readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results2023.rds"))
+  
+  sim_results_pearson_CpG <-
+    sim_results[sim_results$test == "pearson", ]
+  sim_results_pearson_horizontal <-
+    sim_results_pearson_horizontal[sim_results_pearson_horizontal$test == "pearson", ]
   
   
   df_plot <-
@@ -4012,6 +3571,8 @@ if (histogramm_plots) {
     c(
       sim_results_pearson_horizontal$minus_log_alpha,-sim_results_pearson_horizontal$minus_log_alpha
     )
+  
+  
   
   # prepare real resluts
   real_results_pearson <-
@@ -4126,38 +3687,14 @@ if (histogramm_plots) {
     )
   
   
-# Adjusting the plot to differentiate the unpermuted data point
-p <- ggplot(data = df_plot_single, aes(x = slope, y = significant, colour = name)) +
-  geom_point(data = df_plot_single[df_plot_single$name != "pearson.real", ], # Plotting only permuted data with jitter
-             aes(x = slope, y = significant, colour = name),
-             position = position_jitterdodge(jitter.width = 0.25), size = 1, stroke = 0.5) +
-  geom_point(data = df_plot_single[df_plot_single$name == "pearson.real", ], # Plotting unpermuted data without jitter
-             aes(x = slope, y = significant, colour = name),
-             size = 3, stroke = 1) + # Making the unpermuted data point larger
-  theme_minimal(base_size = 12) +
-  ylab(expression(paste("# of significant CpGs:  ", p[value] <= e ^ (-9.3) , ", ", delta[meth] >= 0.39))) +
-  xlab("Pearson correlation slope") +
-  scale_color_manual(values = RColorBrewer::brewer.pal(3, "Set1"),
-                     name = "Dataset Type",
-                     labels = c("CpG Position Permutation", "Sample Age Permutation", "Unpermuted Data")) +
-  theme(legend.position = c(0.95, 0.95), # Coordinates for top right corner
-        legend.justification = c("right", "top"), # Adjusts the anchor point of the legend
-        legend.title = element_text(size = 14),
-        legend.text = element_text(size = 12),
-        legend.background = element_blank(), # Optionally, make legend background transparent
-        axis.title = element_text(size = 14),
-        axis.text = element_text(size = 12),
-        panel.grid.major = element_line(color = "grey80"),
-        panel.grid.minor = element_blank(),
-        strip.text = element_text(size = 14))
-
-
-# Assuming OUTPUT_FOLDER and folder_name are predefined
-file_name <- "count_distribution_age_and_CpG_permutation.png"
-
-# Saving the plot
-ggsave(filename = file.path(OUTPUT_FOLDER, "results", "pearson", folder_name, file_name),
-       plot = p, width = 6, height = 6)
+  file_name <- "count destribution age and CpG permutation.png"
+  
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER, "results", "pearson", folder_name, file_name),
+    plot = p,
+    width = 8,
+    height = 8
+  )
   
   df_plot_simmulations <-
     df_plot_all[df_plot_all$min_delta == delta &
@@ -4175,103 +3712,33 @@ ggsave(filename = file.path(OUTPUT_FOLDER, "results", "pearson", folder_name, fi
   interaction_colors1 <- c("brown1",  "brown3")
   interaction_colors2 <- c("deepskyblue", "deepskyblue3")
   
-  #' p <-
-  #'   ggplot(
-  #'     data = df_plot_simmulations[df_plot_simmulations$name != "pearson.CpG_permutation", ],
-  #'     mapping = aes(
-  #'       x = alpha_string,
-  #'       y = significant,
-  #'       color = interaction(name, slope)
-  #'     )
-  #'   ) +
-  #'   geom_boxplot(outlier.shape = NA) +
-  #'   xlab(label = expression("significance cut off":alpha)) +
-  #'   ylab(label = "number of CpG passing the significance threshold") +
-  #'   scale_color_manual(
-  #'     values = interaction_colors,
-  #'     name = expression("Number of p-values" < e ^ -alpha),
-  #'     #"number of p values < exp(-alpha)",
-  #'     labels = c(
-  #'       #'CpG permutation with negative pearson correlation',
-  #'       'Age permutation with negative pearson correlation',
-  #'       'data with negative pearson correlation',
-  #'       #'CpG permutation with positive pearson correlation',
-  #'       'Age permutation with positive pearson correlation',
-  #'       'data with positive pearson correlation'
-  #'     )
-  #'   ) +
-  #'   theme_minimal() +
-  #'   theme(legend.position = c(.8, .5))+
-    
+  p <-
     ggplot(
-      data = df_plot_simmulations[!df_plot_simmulations$name == "pearson.CpG_permutation", ],
+      data = df_plot_simmulations[df_plot_simmulations$name != "pearson.CpG_permutation", ],
       mapping = aes(
         x = alpha_string,
         y = significant,
-        color = interaction(name, slope)  # Facilitates legend display
+        color = interaction(name, slope)
       )
     ) +
-    geom_boxplot(outlier.shape = NA) +  # Hides outliers
-    xlab(label = expression(alpha ~ " significance cut-off")) +  # Correct expression usage
-    ylab(label = "Number of CpG passing the significance threshold") +  # Improved label description
+    geom_boxplot(outlier.shape = NA) +
+    xlab(label = expression("significance cut off":alpha)) +
+    ylab(label = "number of CpG passing the significance threshold") +
     scale_color_manual(
       values = interaction_colors,
-      name = expression("Number of p-values" < e^-alpha),  # Correct expression formatting for consistency
+      name = expression("Number of p-values" < e ^ -alpha),
+      #"number of p values < exp(-alpha)",
       labels = c(
-        'Age permutation with negative Pearson correlation',
-        'Data with negative Pearson correlation',
-        'Age permutation with positive Pearson correlation',
-        'Data with positive Pearson correlation'
+        #'CpG permutation with negative pearson correlation',
+        'Age permutation with negative pearson correlation',
+        'data with negative pearson correlation',
+        #'CpG permutation with positive pearson correlation',
+        'Age permutation with positive pearson correlation',
+        'data with positive pearson correlation'
       )
     ) +
-    theme_minimal() +  # Clean minimalistic theme
-    theme(
-      legend.position = c(0.8, 0.5)  # Adjust legend position to be inside the plot area
-    )+
-    ylim(c(0,800))
-  
-  
-    # Base colors from RColorBrewer
-    base_colors <- brewer.pal(3, "Set1")
-    
-    # Create extended palette: adjust transparency or use `scales::darken/lighten` for variations
-    extended_palette <- c(
-      scales::alpha(base_colors[1], 0.5), base_colors[1],
-      scales::alpha(base_colors[2], 0.5), base_colors[2],
-      scales::alpha(base_colors[3], 0.5), base_colors[3]
-    )
-    
-    # Adjust names in the extended_palette to match the unique_interaction_values
-    names(extended_palette) <- c(
-      "pearson.CpG_permutation.negative", "pearson.CpG_permutation.positive",
-      "pearson.horizontal.negative", "pearson.horizontal.positive",
-      "pearson.real.negative", "pearson.real.positive"
-    )
-    
-    # Updated ggplot code using the corrected color palette
-    ggplot(df_plot_simmulations, aes(x = alpha_string, y = significant, color = interaction(name, slope))) +
-      geom_boxplot(
-        data = df_plot_simmulations[df_plot_simmulations$name != "pearson.real", ],
-        aes(color = interaction(name, slope)),  # Ensure this interaction correctly matches palette names
-        outlier.shape = NA  # Hides outliers
-      ) +
-      geom_point(
-        data = df_plot_simmulations[df_plot_simmulations$name == "pearson.real", ],
-        aes(color = interaction(name, slope)),
-        size = 2,  # Adjust size for visibility
-        shape = 19  # Solid circle
-      ) +
-      xlab(label = expression(alpha ~ " significance cut-off")) +
-      ylab(label = "Number of CpG passing the significance threshold") +
-      scale_color_manual(
-        values = extended_palette,
-        name = "Dataset Type",
-        labels = names(extended_palette)
-      ) +
-      theme_minimal() +
-      theme(legend.position = c(0.8, 0.5)) +
-      ylim(c(0, 800))
-    
+    theme_minimal() +
+    theme(legend.position = c(.8, .5))
   
   file_name <- "all alpha count destribution age permutation.png"
   
@@ -4556,13 +4023,14 @@ if (summerize_horizonal_columns_permutations) {
   
   file_names <-
     list.files(
-      path = file.path(OUTPUT_FOLDER, "simulation"),
+      path = file.path(OUTPUT_FOLDER, paste(test,"horizontal",sep = ".")),
       pattern = paste(test, "horizontal.*", sep = ".")
     )
+  print(length(file_names))
   
   start_time <- Sys.time()
   sim_results <-
-    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, "simulation", file_names))
+    parallel_summerize_permutations(sim_file_names = file.path(OUTPUT_FOLDER, paste(test,"horizontal",sep = "."), file_names))
   end_time <- Sys.time()
   print(end_time - start_time)
   
@@ -4605,18 +4073,12 @@ if (summerize_real_values) {
 
 # aggregate CpG results -------------------------------------------------------
 if (aggregate_CpG_results) {
-  
-  #   test <- "pearson"
-  
   real_results <-
     readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
-  
-  test.real_results <- real_results[real_results$test == test,]
-  
   #sim_results <-
   #  readRDS(file = file.path(OUTPUT_FOLDER, "horizontal.sim_results.rds"))
-  # sim_results <-
-  #   readRDS(file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results.rds"))
+  sim_results <-
+    readRDS(file = file.path(OUTPUT_FOLDER, "CpG_permutation.sim_results.rds"))
   
   
   df_empirical_means <-
@@ -4634,24 +4096,17 @@ if (aggregate_CpG_results) {
       df_empirical_means$test
     ), ]
   
-  # df_empirical_means$real_count <-
-  #   real_results$n_signfincant_CpG[order(real_results$min_delta,
-  #                                        real_results$minus_log_alpha,
-  #                                        real_results$test)]
-  # 
   df_empirical_means$real_count <-
-    test.real_results$n_signfincant_CpG[order(test.real_results$min_delta,
-                                              test.real_results$minus_log_alpha,
-                                              test.real_results$test)]
+    real_results$n_signfincant_CpG[order(real_results$min_delta,
+                                         real_results$minus_log_alpha,
+                                         real_results$test)]
   
   df_empirical_means$FDR <-
     df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
   
-  df_empirical_means$observed_Vs_expected <-  df_empirical_means$real_count / df_empirical_means$n_signfincant_CpG
-  
   saveRDS(
     object = df_empirical_means,
-    file = file.path(OUTPUT_FOLDER, paste(test,"df_CpG_vertical_empirical_means.rds",sep = "."))
+    file = file.path(OUTPUT_FOLDER, "df_CpG_vertical_empirical_means.rds")
   )
   #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_horizontal_column_empirical_means.rds"))
   
@@ -4689,7 +4144,7 @@ if (aggregate_CpG_results) {
 }
 # aggregate horizontal results -------------------------------------------------------
 if (aggregate_horizontal_results) {
-  test <- "KW"
+  #test <- "pearson"
   real_results <-
     readRDS(file = file.path(OUTPUT_FOLDER, "real_results.rds"))
   # sim_results <-
@@ -4733,9 +4188,8 @@ if (aggregate_horizontal_results) {
   
   df_empirical_means$FDR <-
     df_empirical_means$n_signfincant_CpG / df_empirical_means$real_count
-  df_empirical_means$observed_Vs_expected <-  df_empirical_means$real_count / df_empirical_means$n_signfincant_CpG
   
-  #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_CpG_vertical_empirical_means_cluster.rds"))
+  #saveRDS(object = df_empirical_means,file = file.path(OUTPUT_FOLDER,"df_CpG_vertical_empirical_means.rds"))
   saveRDS(object = df_empirical_means,
           file = file.path(
             OUTPUT_FOLDER,
@@ -4744,17 +4198,11 @@ if (aggregate_horizontal_results) {
 }
 # plot landscape -------------------------------------------------------
 if (plot_landscape) {
-  
-  load_variable_if_not_exists(
-    variable_name =  "df_peak_CpG_complete_with_test" ,
-    file_path = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds")
-  )
-  
-  min_alpha <- 6
+  min_alpha <- 6.5
   max_alpha <- 9.9
-  min_delta <- 0.1
-  test <- "KW"
-  min_real_count <- 2
+  min_delta <- 0.2
+  #test <- "KW"
+  min_real_count <- 5
   
   
   # min(best_CpGs$start)
@@ -4765,43 +4213,12 @@ if (plot_landscape) {
   search_df <-
     df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
                          df_empirical_means$minus_log_alpha <= max_alpha &
-                         df_empirical_means$min_delta >= min_delta &
-                         df_empirical_means$test == test &
+                         df_empirical_means$min_delta > min_delta &
+                         df_empirical_means$test == test
+                       &
                          min_real_count <= df_empirical_means$real_count
                        # &  df_empirical_means$n_signfincant_CpG > 0
                        ,]
-  
-  plot <-plotly::plot_ly(
-    data = search_df,
-    x = ~min_delta,
-    y = ~minus_log_alpha,
-    z = ~observed_Vs_expected,
-    type = "scatter3d",
-    mode = "markers",
-    marker = list(
-      color = ~observed_Vs_expected,
-      colorscale = c('#683531', '#FFE1A1'),
-      showscale = TRUE
-    )
-  )
-  
-  plot <- layout(plot, scene = list(
-    xaxis = list(
-      title = 'Minimum delta methylation',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for X axis title
-    ),
-    yaxis = list(
-      title = '-log(p_value)',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for Y axis title
-    ),
-    zaxis = list(
-      title = 'Observed vs. Expected',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for Z axis title
-    )
-  ))
-  
-  plot
-  
   
   plotly::plot_ly(
     search_df ,
@@ -4817,8 +4234,12 @@ if (plot_landscape) {
   
   best_values <- search_df[which.min(search_df$FDR),]
   best_CpGs <-
-    df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$kw.delta >= best_values$min_delta &
-                                     df_peak_CpG_complete_with_test$kw.p_val <= exp(-best_values$minus_log_alpha), ]
+    df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test[,paste(tolower(test),"delta",sep = ".")] >= best_values$min_delta &
+                                     df_peak_CpG_complete_with_test[,paste(tolower(test),"p_val",sep = ".")] <= exp(-best_values$minus_log_alpha), ]
+  
+  best_CpGs <- df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test[,paste(tolower(test),"delta",sep = ".")] >= 0.01 &
+                                   df_peak_CpG_complete_with_test[,paste(tolower(test),"p_val",sep = ".")] <= exp(-best_values$minus_log_alpha) &
+                                 df_peak_CpG_complete_with_test$pearson.statistic > 0, ]
   
   folder_name <- paste("delta",
                        best_values$min_delta,
@@ -4856,7 +4277,7 @@ if (plot_landscape) {
               sep = ".")
       ),
       width = 6,
-      height = 5
+      height = 6
     )
     
     p <-
@@ -4871,27 +4292,20 @@ if (plot_landscape) {
         paste("linear",
               best_CpGs$chrom[r],
               best_CpGs$start[r],
-              ".png",
+              "png",
               sep = ".")
       ),
       width = 6,
-      height = 5
+      height = 6
     )
-    
   }
 }
 # plot pearson landscape --------------------------------------------------
 if (pearson_landscape) {
-  
-  load_variable_if_not_exists(
-    variable_name =  "df_peak_CpG_complete_with_test" ,
-    file_path = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds")
-  )
-  
   min_alpha <- 6.5
   max_alpha <- 9.9
   min_delta <- 0.2
-  test <- "pearson"
+  #test <- "pearson"
   min_real_count <- 1
   
   search_df <-
@@ -4963,7 +4377,6 @@ if (pearson_landscape) {
       "best_CpGs.rds"
     )
   )
-  
   for (r in 1:nrow(best_CpGs)) {
     p <-
       plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
@@ -4983,6 +4396,56 @@ if (pearson_landscape) {
   }
 }
 # manual selection  --------------------------------------------------
+if(FALSE){
+  index <- sim_results$test == test & sim_results$min_delta == best_values$min_delta & sim_results$minus_log_alpha == best_values$minus_log_alpha
+  simulations_for_specific_value <-  sim_results[index,]
+  rx <- real_results[real_results$test == test & real_results$min_delta == best_values$min_delta & real_results$minus_log_alpha == best_values$minus_log_alpha,]
+  simulations_for_specific_value <- rbind(simulations_for_specific_value,rx)
+  p_val <-  sum(simulations_for_specific_value$n_signfincant_CpG > rx$n_signfincant_CpG)/length(unique(sim_results$name))
+  
+  # p <- ggplot(data = simulations_for_specific_value,mapping = aes(x = permuation_type,y = n_signfincant_CpG,color=permuation_type))+
+  #   geom_boxplot(outlier.shape = NA)+
+  #   geom_point(position = "jitter")+
+  #   ylab(expression(
+  #     paste("# significant CpG ", p[value] <= e ^ (-9.3), ", ", delta[meth] >= 0.39)
+  #   ))+
+  #   scale_x_discrete(labels = c("permuted data", "original data"))+
+  #   xlab("")+theme_minimal_hgrid()
+  
+  library(ggsignif)
+  
+  p <-
+    ggplot(
+      data = simulations_for_specific_value,
+      mapping = aes(x = permuation_type, y = n_signfincant_CpG, color = permuation_type)
+    ) +
+    geom_boxplot(outlier.shape = NA) +
+    geom_point(position = "jitter") +
+    geom_signif(
+      comparisons = list(unique(
+        simulations_for_specific_value$permuation_type
+      )),
+      annotations = "p = 0.002 **",
+      y_position = 60,
+      tip_length = 0.01,
+      vjust = 0.4,
+      color = "black"
+    ) +
+    ylab(expression(paste(
+      "# significant CpG ", p[value] <= e ^ (-9.3), ", ", delta[meth] >= 0.39
+    ))) +
+    scale_x_discrete(labels = c("permuted data", "original data")) +
+    xlab("") +
+    theme_minimal_hgrid()
+  file_name <- "p_val of monte carslom permutation.png"
+  ggsave(
+    filename = file.path(OUTPUT_FOLDER, "results", "pearson", folder_name, file_name),
+    plot = p,
+    width = 6,
+    height = 6
+  )
+  
+}
 if (FALSE) {
   test <- "pearson"
   all_CpG_complete_with_test <-
@@ -5249,16 +4712,10 @@ if (FALSE) {
                showWarnings = FALSE
              )
              
-             # List to store each plot
-             plot_list <- list()
              
              for (r in 1:nrow(significant_CpGs)) {
                p <-
                  plot_age_correlation(df_row = significant_CpGs[r,], typisation = real_age_typisation)
-               
-               # Append the plot to the list
-               plot_list[[r]] <- p
-               
                ggsave(
                  plot = p,
                  filename = file.path(
@@ -5275,30 +4732,10 @@ if (FALSE) {
                      ".png",
                      sep = "."
                    )
-                 ),width = 8,height = 8
+                 )
                )
              }
 }
-
-combined_plot <- wrap_plots(plot_list[!significant_CpGs$GeneAnnotation %in% c("CIDEB","FMO5","SIRT1","NR3C1")], ncol = 9)
-print(combined_plot)
-
-ggsave(
-  filename = file.path(
-    OUTPUT_FOLDER,
-    "results",
-    test,
-    folder_name,
-    "plots",
-    paste("rest_combined",
-      ".png",
-      sep = "."
-    )
-  ),width = 35,
-  height = 20
-)
-
-
 # https://maayanlab.cloud/Enrichr/enrich?dataset=47ed0059768b38095dca92d0748c5055
 
 # plot sim vs real --------------------------------------------------------
@@ -5529,7 +4966,7 @@ if (gene_annotation) {
 
 # PCA --------------------------------------------------------
 if (plot_PCA) {
-  normalize_PCA <- FALSE
+  normalize_PCA <- TRUE
   if (normalize_PCA) {
     normalized_string <- "normalized"
   } else{
@@ -5540,14 +4977,10 @@ if (plot_PCA) {
   
   meta37 <-
     meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample),]
-  
-  meta37 <-
-    meta
-  
   # truncate to only three groups
   # trauncate min delta pearson.delta
   data_meth <-
-    df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= 0.39, as.character(real_age_typisation$sample)]
+    df_peak_CpG_complete_with_test[df_peak_CpG_complete_with_test$pearson.delta >= 0.39, as.character(real_food_typisation$sample)]
   #print("erase non complete rows")
   data_meth <- data_meth[complete.cases(data_meth),]
   data_meth <-
@@ -5774,55 +5207,19 @@ if (plot_PCA) {
   
   ## Type
   
-  # p_pca <-
-  #   ggplot(data = df_pca , aes(
-  #     x = PC1,
-  #     y = PC2,
-  #     label = sample,
-  #     color = Type
-  #   )) +
-  #   geom_point() +
-  #   ggrepel::geom_text_repel() +
-  #   #labs(subtitle = "PCA_1v2 & Type") +
-  #   theme_minimal() +
-  #   xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
-  #   ylab(paste("PC2 : ", round(pca_summery[2] * 100, 1), "%"))+
-  #   scale_color_manual(values = setNames(mean_age_by_type$color, mean_age_by_type$Type))
-  
   p_pca <-
-    ggplot(data = df_pca, aes(
+    ggplot(data = df_pca , aes(
       x = PC1,
       y = PC2,
       label = sample,
       color = Type
     )) +
-    geom_point(size = 3, alpha = 0.8) +  # Larger points with slight transparency
-    ggrepel::geom_text_repel(
-      size = 3.5,  # Slightly larger text size for better readability
-      box.padding = unit(0.35, "lines"),  # Add padding around text
-      point.padding = unit(0.5, "lines"),  # Avoid clashing text with points
-      segment.color = 'grey50'  # Use a softer line color for text pointers
-    ) +
-    scale_color_manual(values = setNames(mean_age_by_type$color, mean_age_by_type$Type)) +
-    labs(
-      title = "Principal Component Analysis (PCA)",  # Add a main title
-      subtitle = "PCA Scatter Plot of PC1 vs PC2 by diet",  # Include a descriptive subtitle
-      caption = "Each point represents a sample colored by its diet."  # Caption at the bottom
-    ) +
+    geom_point() +
+    ggrepel::geom_text_repel() +
+    #labs(subtitle = "PCA_1v2 & Type") +
     theme_minimal() +
-    theme(
-      plot.title = element_text(size = 16, face = "bold"),  # Bold and larger title font
-      plot.subtitle = element_text(size = 14),  # Slightly smaller subtitle font
-      plot.caption = element_text(size = 12, margin = margin(t = 10, b = 10)),  # Caption with margins for space
-      axis.title = element_text(size = 14),  # Axis titles sizing
-      axis.text = element_text(size = 12),  # Axis labels sizing
-      legend.position = "right",  # Ensure the legend is positioned well
-      legend.title = element_blank(),  # Remove the legend title for cleaner look
-      legend.text = element_text(size = 12)  # Legend text sizing
-    ) +
-    xlab(paste("PC1: ", round(pca_summery[1] * 100, 1), "% Variance Explained")) +  # More descriptive axis label
-    ylab(paste("PC2: ", round(pca_summery[2] * 100, 1), "% Variance Explained"))  # More descriptive axis label
-  
+    xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
+    ylab(paste("PC2 : ", round(pca_summery[2] * 100, 1), "%"))
   
   ggsave(
     plot = p_pca,
@@ -5964,57 +5361,3 @@ if (DO_enrichment_analysis) {
 #   geom_smooth(method = "lm", se = FALSE) +
 #   annotate("text", x = Inf, y = Inf, label = sprintf("r = %.2f (p = %.6f)", corr_coef, p_value),
 #            hjust = 1.1, vjust = 2, size = 5, colour = "red")
-
-
-# DMP analysis 
-if(FALSE){
-  # criterion: methylation difference greater than a threshold
-threshold_delta <- 0.3  # Adjust based on your specific criteria
-threshold_p <- 0.001
-df_peak_CpG_complete_with_test$DMP <-
-  df_peak_CpG_complete_with_test$pearson.delta >= threshold_delta &
-  df_peak_CpG_complete_with_test$pearson.p_val <= threshold_p # Add a logical column for DMP status
-
-library(dplyr)
-
-# Assuming df_peak_CpG_complete_with_test is your data frame
-df_peak_CpG_complete_with_test <- df_peak_CpG_complete_with_test %>%
-  mutate(DMP = (pearson.delta >= threshold_delta) & (pearson.p_val <= threshold_p))
-
-
-# Sort by chromosome, start position, and name to ensure grouping works correctly
-df_sorted <- df_peak_CpG_complete_with_test %>%
-  arrange(chrom, start, name)
-
-# Function to find clusters of DMPs and calculate additional metrics
-find_dmp_clusters <- function(df) {
-  df <- df %>%
-    mutate(cluster = cumsum(!DMP | lag(name, default = first(name)) != name))
-  
-  grouped <- df %>%
-    group_by(chrom, name, cluster) %>%
-    filter(any(DMP)) %>%
-    summarise(
-      start = min(start),
-      end = max(end),
-      avg_delta = mean(pearson.delta),
-      num_CpGs = n(),  # Count number of CpGs in the cluster
-      segment_length = end - start + 1,  # Calculate the length of the segment
-      median_p_value = median(pearson.p_val, na.rm = TRUE),  # Calculate median p-value
-      .groups = 'drop'
-    ) %>%
-    arrange(chrom, start)
-  
-  # Reset cluster ids to be consecutive
-  grouped$cluster <- as.integer(factor(grouped$cluster))
-  
-  return(grouped)
-}
-
-# Apply the function
-dmr_groups <- find_dmp_clusters(df_sorted)
-
-dmr_groups[dmr_groups$num_CpGs == max(dmr_groups$num_CpGs),]
-
-dmr_groups[dmr_groups$segment_length == max(dmr_groups$segment_length),]
-}
