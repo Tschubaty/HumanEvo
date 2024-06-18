@@ -178,11 +178,11 @@ KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
 
 # set running parameters -------------------------------------------------------
 H3K27ac_Analysis <- FALSE
-compute_df_state_sample <- TRUE
-compute_df_state_group_sample <- TRUE
-compute_df_state <- TRUE
-compute_df_state_group <- TRUE
-compute_make_plots <- TRUE
+compute_df_state_sample <- FALSE
+compute_df_state_group_sample <- FALSE
+compute_df_state <- FALSE
+compute_df_state_group <- FALSE
+compute_make_plots <- FALSE
 create_true_stat <- FALSE
 describe_Data <- FALSE
 create_permutations_horizonal_columns <- FALSE
@@ -211,6 +211,73 @@ df_peak_CpG <-
   )
 
 # define functions ---------------------------------------------------------
+
+
+correct_state_name <- function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x))
+
+
+# Create a nice printout
+interpretation <- function(test_name, test_result, subset_name, fullset_name) {
+  cat("\n")
+  cat(paste0("=====================================\n"))
+  cat(paste0("          ", test_name, " Results\n"))
+  cat(paste0("=====================================\n"))
+  cat(paste0("Test Statistic: ", formatC(test_result$statistic, format = "e", digits = 2), "\n"))
+  cat(paste0("P-value: ", formatC(test_result$p.value, format = "e", digits = 2), "\n"))
+  cat(paste0("\nInterpretation:\n"))
+  
+  if (test_result$p.value < 0.05) {
+    cat(paste0("There is a statistically significant difference in the distribution of ", subset_name, " compared to ", fullset_name, ".\n"))
+    cat(paste0("The p-values in ", subset_name, " are significantly smaller than those in ", fullset_name, ".\n"))
+  } else {
+    cat(paste0("There is no statistically significant difference in the distribution of ", subset_name, " compared to ", fullset_name, ".\n"))
+    cat(paste0("The p-values in ", subset_name, " are not significantly smaller than those in ", fullset_name, ".\n"))
+  }
+  cat("\n")
+}
+
+# Define the main function
+test_genomic_subsets <- function(df_ranges, df_full) {
+  # Ensure unique rows
+  df_ranges <- df_ranges %>% distinct()
+  
+  # Convert data frames to GRanges objects
+  gr_ranges <- makeGRangesFromDataFrame(df_ranges, seqnames.field = "chr", start.field = "start", end.field = "end")
+  gr_full <- makeGRangesFromDataFrame(df_full, seqnames.field = "chrom", start.field = "start", end.field = "end")
+  
+  # Find overlaps
+  overlaps <- findOverlaps(gr_full, gr_ranges)
+  
+  # Select rows with overlaps
+  df_subset <- df_full[queryHits(overlaps), ]
+  
+  cat(paste0("# CpGs in subset query: ", as.character(nrow(df_subset)), ".\n"))
+  
+  # Ensure the pearson.p_val and kw.p_val columns exist in both datasets
+  if (!("pearson.p_val" %in% names(df_subset) && "pearson.p_val" %in% names(df_full))) {
+    stop("pearson.p_val column not found in one of the datasets.")
+  }
+  if (!("kw.p_val" %in% names(df_subset) && "kw.p_val" %in% names(df_full))) {
+    stop("kw.p_val column not found in one of the datasets.")
+  }
+  
+
+  print(nrow(df_subset))
+  print(nrow(df_full))
+  
+  # Perform Wilcoxon rank-sum test for pearson.p_val
+  pearson_test_result <- wilcox.test(df_subset$pearson.p_val, df_full$pearson.p_val, alternative = "less")
+  
+  # Print the result for pearson.p_val
+  interpretation("Wilcoxon Rank-Sum Test for p-values from Pearson correlation", pearson_test_result, "subset", "full dataset")
+  
+  # Perform Wilcoxon rank-sum test for kw.p_val
+  kw_test_result <- wilcox.test(df_subset$kw.p_val, df_full$kw.p_val, alternative = "less")
+  
+  # Print the result for kw.p_val
+  interpretation("Wilcoxon Rank-Sum Test for p-values from KW test", kw_test_result, "subset", "full dataset")
+  return(list(pearson_test_result = pearson_test_result,kw_test_result = kw_test_result))
+}
 
 #' Load a Variable if Not Already Present in Workspace
 #'
@@ -1301,7 +1368,7 @@ if (H3K27ac_Analysis) {
     theme(
       axis.line = element_line(colour = "black"),
       panel.background = element_blank(),
-      legend.position = "none",
+      #legend.position = "none",
       axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1, face = "bold", size = 12),  # Make x-axis text bold
       axis.text.y = element_text(face = "bold", size = 12),  # Make y-axis text bold
       axis.title.x = element_text(face = "bold", size = 14),  # Make x-axis title bold
@@ -1311,9 +1378,10 @@ if (H3K27ac_Analysis) {
       text = element_text(face = "bold")  # Make all other text bold by default
     ) +
     ylim(0, 40) +
-    ylab("% of CpGs covered by H3K27ac") +
+    ylab("% of CpGs covered by H3K27ac peaks") +
     xlab("") +
-    scale_fill_manual(values = unique(as.character(df_universal_annotation$color)))+
+    #scale_fill_manual(values = unique(as.character(df_universal_annotation$color)))+
+    scale_fill_manual(values = "black")+
     scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))+
     geom_hline(yintercept = 2.4, linetype = "dashed", color = "blue")
   
@@ -1342,12 +1410,6 @@ if (H3K27ac_Analysis) {
 
 # Genome wide Analysis --------------------------------------------------------
 if (Genome_wide_Analysis) {
-  # load entire methylome
-  all_CpG.39.samples.merged.hg19 <-
-    readRDS(
-      "methylation+chip/all_CpG.39.samples.merged.hg19.rds"
-    )
-  
   # create results folder
   folder_name <- file.path(OUTPUT_FOLDER, "results", "WholeGenome")
   if (!file.exists(folder_name)) {
@@ -1460,7 +1522,10 @@ if (FALSE) {
            levels = unique(df_universal_annotation$color))
   all_CpG_complete_with_test$state_group <-
     factor(df_universal_annotation$Group[matching_indices],
-           levels = unique(df_universal_annotation$Group))
+           levels = correct_state_name(x = unique(df_universal_annotation$Group)))
+
+  
+  all_CpG_complete_with_test$pearson.p_val_BH <- p.adjust(all_CpG_complete_with_test$pearson.p_val, method = "BH")
   
   saveRDS(
     object = all_CpG_complete_with_test,
@@ -1862,6 +1927,10 @@ if (compute_df_state_group) {
   
   df_state_group$expected_n_H3K27AC <-
     df_state_group$n_total * expected_fraction
+  
+  df_state_group$state_group <- factor(x = df_state_group$state_group,levels = df_state_group$state_group)
+  
+  df_state_group$color <- unique(as.character(df_universal_annotation$color))
   
  saveRDS(
     object = df_state_group,
@@ -2726,41 +2795,56 @@ if (state_dependen_analysis) {
 if (FALSE) {
   min_delta <- 0.5
   max_p <- 0.001
-  genome_CpG_data_hg19 <-
-    all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
-                                      x = all_CpG_complete_with_test$state,
-                                      ignore.case = TRUE) &
-                                 all_CpG_complete_with_test$pearson.delta >= min_delta,]
   
-  counts_min_delta_by_state_group <- genome_CpG_data_hg19 %>%
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test",
+    file_path = file.path(OUTPUT_FOLDER,"results", "WholeGenome", "all_CpG_complete_with_test.rds")
+  )
+  
+  #total <- sum(all_CpG_complete_with_test$pearson.delta >= min_delta  & all_CpG_complete_with_test$pearson.p_val <= max_p)
+  
+  # genome_CpG_with_delta <-
+  #   all_CpG_complete_with_test[!grepl(pattern = "GapArtf",
+  #                                     x = all_CpG_complete_with_test$state,
+  #                                     ignore.case = TRUE) &
+  #                                all_CpG_complete_with_test$pearson.delta >= min_delta,]
+  
+  
+  #p.multiple <- p.adjust(all_CpG_complete_with_test$pearson.p_val, method = "BY")
+  #sum(p-adjust < )
+  
+  genome_CpG_with_delta <-
+    all_CpG_complete_with_test[all_CpG_complete_with_test$pearson.delta >= min_delta,]
+  
+  counts_min_delta_by_state_group <- genome_CpG_with_delta %>%
     count(state_group) 
   
-  counts_min_delta <- genome_CpG_data_hg19 %>%
+  counts_min_delta <- genome_CpG_with_delta %>%
     count(state)
   
-  significant_genome_CpG_data_hg19 <-
-    genome_CpG_data_hg19[genome_CpG_data_hg19$pearson.p_val <= max_p,]
+  significant_genome_CpG_with_delta <-
+      genome_CpG_with_delta[genome_CpG_with_delta$pearson.p_val <= max_p,]
   
-  counts_sig_min_delta <- significant_genome_CpG_data_hg19 %>%
+  counts_sig_min_delta <- significant_genome_CpG_with_delta %>%
     count(state)
   
   
-  #plot_age_correlation(df_row = significant_genome_CpG_data_hg19[1,],typisation = real_age_typisation)
+  #plot_age_correlation(df_row = significant_genome_CpG_with_delta[1,],typisation = real_age_typisation)
   
-  significant_genome_CpG_data_hg19$slope <-
-    ifelse(significant_genome_CpG_data_hg19$pearson.statistic <= 0,
+  significant_genome_CpG_with_delta$slope <-
+    ifelse(significant_genome_CpG_with_delta$pearson.statistic <= 0,
            "negative",
            "positive")
   
   # Example calculation
-  result <- significant_genome_CpG_data_hg19 %>%
+  result <- significant_genome_CpG_with_delta %>%
     group_by(state) %>%
     summarize(
       fraction_negative = mean(slope == "negative", na.rm = TRUE),
       fraction_positive = mean(slope == "positive", na.rm = TRUE)
     )
   
-  counts_sig_min_delta_slope <- significant_genome_CpG_data_hg19 %>%
+  counts_sig_min_delta_slope <- significant_genome_CpG_with_delta %>%
     mutate(
       state = factor(state),  # Convert to factor if not already
       slope = factor(slope)   # Convert to factor ensuring all possible slopes are levels
@@ -2770,20 +2854,20 @@ if (FALSE) {
     ungroup() %>%
     complete(state, slope, fill = list(n = 0))  # Fill missing combinations with zero counts
   
-  counts_sig_min_delta_slope_by_state_group <- significant_genome_CpG_data_hg19 %>%
+  counts_sig_min_delta_slope_by_state_group <- significant_genome_CpG_with_delta %>%
     group_by(state_group) %>%
     count(slope)
   
   counts_sig_min_delta_slope_by_state_group <- counts_sig_min_delta_slope_by_state_group %>%
     left_join(counts_min_delta_by_state_group, by = "state_group", suffix = c("", "_total"))
   
-  counts_sig_min_delta_by_state_group <- significant_genome_CpG_data_hg19 %>%
+  counts_sig_min_delta_by_state_group <- significant_genome_CpG_with_delta %>%
     count(state_group)
   counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
     left_join(counts_min_delta_by_state_group,by = "state_group", suffix = c("", "_total"))
   counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
     mutate(proportion = n / n_total)
-  counts_sig_min_delta_by_state_group$state_color <- unique(df_universal_annotation$color)[-1]
+  counts_sig_min_delta_by_state_group$state_color <- unique(df_universal_annotation$color)
   
   
   # change HET to heterochromatin etc. 
@@ -2863,6 +2947,10 @@ if (FALSE) {
       ''
     )
   
+  counts_sig_min_delta_by_state_group$state_group <-
+    factor(counts_sig_min_delta_by_state_group$state_group,
+           levels = counts_sig_min_delta_by_state_group$state_group)
+  
   ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
     geom_col() + # Use geom_col for pre-calculated values
     geom_text(aes(label = significance, y = proportion + 0.0005), position = position_dodge(width = 0.9), vjust = -0.5, check_overlap = TRUE) +
@@ -2872,9 +2960,9 @@ if (FALSE) {
       y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta >= 0.5),
       fill = "State Group"
     ) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1])
+    scale_fill_manual(values = unique(df_universal_annotation$color))
   
-#Figure 2C
+#Figure 1C
   
   p <- ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
     geom_col(color = "black", show.legend = FALSE) +  # Use geom_col for pre-calculated values and hide legend
@@ -2886,10 +2974,10 @@ if (FALSE) {
       check_overlap = TRUE
     ) +
     geom_hline(yintercept = expected_uniform_proportion, linetype = "dashed", color = "blue", size = 1) +
-    scale_fill_manual(values = unique(df_universal_annotation$color)[-1]) +  # Apply your color palette
+    scale_fill_manual(values = unique(df_universal_annotation$color)) +  # Apply your color palette
     labs(
       x = NULL,  # Removing the x-axis label for clarity
-      y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta >= 0.5)
+      y = expression("Proportion of significant CpGs" ~ (p <= 0.001) ~ "from CpGs with" ~ delta[meth] >= 0.5)
     ) +
     theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
     theme(
@@ -2903,8 +2991,8 @@ if (FALSE) {
       panel.grid.major = element_blank(),  # Clean background without major grid lines
       panel.grid.minor = element_blank(),  # Clean background without minor grid lines
       legend.position = "none"  # Removing the legend to reduce clutter
-    ) +
-    scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
+    ) # +
+    # scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
   
   ggsave(
     filename = file.path(
@@ -2950,8 +3038,8 @@ if (FALSE) {
     )
   counts_sig_min_delta_slope_by_state_group$state_color <- unique(df_universal_annotation$color)[matching_indices]
   # sanity check
-  # sum(significant_genome_CpG_data_hg19$slope[significant_genome_CpG_data_hg19$state == "99_TSS2"] == "positive",na.rm = TRUE)
-  # sum(significant_genome_CpG_data_hg19$slope[significant_genome_CpG_data_hg19$state == "99_TSS2"] == "negative",na.rm = TRUE)
+  # sum(significant_genome_CpG_with_delta$slope[significant_genome_CpG_with_delta$state == "99_TSS2"] == "positive",na.rm = TRUE)
+  # sum(significant_genome_CpG_with_delta$slope[significant_genome_CpG_with_delta$state == "99_TSS2"] == "negative",na.rm = TRUE)
   
   p <- ggplot(
     data = counts_sig_min_delta_slope,
@@ -3271,10 +3359,121 @@ if (create_true_stat) {
   df_peak_CpG_complete_with_test <-
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
 }
-# describe LOCUS ---------------------------------------------------------------
+# check other publications: describe LOCUS ---------------------------------------------------------------
 if (FALSE) {
+  
+  study_comparison <- as.data.frame(matrix(ncol = 5,nrow = 5))
+  colnames(study_comparison) <- c("publication",
+                                  "origin",
+                                  "# CpG", 
+                                  "p.val comparison with tempral shift pearson test",
+                                  "p.val comparison with Kruskal Wallis lifestly test")
+  
   # all_CpG_complete_with_test <- readRDS("12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds")
   
+  #https://clinicalepigeneticsjournal.biomedcentral.com/articles/10.1186/s13148-019-0680-7/tables/2
+  library(dplyr)
+  library(GenomicRanges)
+  library(openxlsx)
+  
+  # Load the data barbados
+  df_barbados <- read.table(file = file.path("other_pubs", "Barbados", "barbadosLiftToHg19.bed"), header = FALSE, sep = "\t")
+  colnames(df_barbados) <- c("chr", "start", "end")
+  
+  tests_barbados <- test_genomic_subsets(df_barbados, all_CpG_complete_with_test)
+  
+  study_comparison[1,] <- c("Peter et al., 2016","malnutrition on Barbados",418,tests_barbados$pearson_test_result$p.value,tests_barbados$kw_test_result$p.value)
+  
+  # Load the data dutch
+  df_dutch <- read.table(file = file.path("other_pubs", "Dutch hunger", "dutch.hunger.liftTo.hg19.bed"), header = FALSE, sep = "\t")
+  colnames(df_dutch) <- c("chr", "start", "end","name")
+  tests_dutch <- test_genomic_subsets(df_dutch, all_CpG_complete_with_test)
+  
+  study_comparison[2,] <- c("Tobi et al., 2014","Dutch hunger",11697,tests_dutch$pearson_test_result$p.value,tests_dutch$kw_test_result$p.value)
+  
+  
+  # Load the data bangladesh
+  df_bangladesh <-
+    read.xlsx(
+      xlsxFile = file.path(
+        "other_pubs",
+        "rural Bangladesh",
+        "bmjopen-2016-November-6-11 - inline-supplementary-material-1.xlsx"
+      ),
+      sheet = "significant"
+    )
+  
+  df_bangladesh$start <- df_bangladesh$MAPINFO -1 
+  df_bangladesh$end <- df_bangladesh$MAPINFO +1 
+  names(df_bangladesh)[names(df_bangladesh) == "chr"] <- "CHR"
+  
+  tests_bangladesh <- test_genomic_subsets(df_bangladesh, all_CpG_complete_with_test)
+  
+  study_comparison[3,] <- c("Finer et al., 2016","hunger bangladesh",57,tests_bangladesh $pearson_test_result$p.value,tests_bangladesh$kw_test_result$p.value)
+  
+  # Load the data chinese
+  df_chineses <-
+    read.xlsx(
+      xlsxFile = file.path(
+        "other_pubs",
+        "Chinese famine",
+        "13148_2019_680_MOESM2_ESM (1).xlsx"
+      ),
+      sheet = "cpg rank Chinese"
+    )
+  
+  df_chineses$start <- df_chineses$pos -1 
+  df_chineses$end <- df_chineses$pos +1 
+  df_chineses$CHR <- paste0("chr",df_chineses$CHR)
+  
+  #names(df_chineses)[names(df_chineses) == "chr"] <- "CHR"
+  
+  test_chinese <- test_genomic_subsets(df_chineses, all_CpG_complete_with_test)
+  
+  study_comparison[4, ] <-
+    c(
+      "He et al., 2019a",
+      "chinese great hunger",
+      18778,
+      test_chinese$pearson_test_result$p.value,
+      test_chinese$kw_test_result$p.value
+    )
+  
+  
+  # Load the data fibrolast
+  df_fibrolast <-
+    read.xlsx(
+      xlsxFile = file.path(
+        "other_pubs",
+        "Chinese famine",
+        "13148_2019_680_MOESM2_ESM (1).xlsx"
+      ),
+      sheet = "cpg rank Fibroblasts"
+    )
+  
+  df_fibrolast$start <- df_fibrolast$pos -1 
+  df_fibrolast$end <- df_fibrolast$pos +1 
+  df_fibrolast$CHR <- paste0("chr",df_fibrolast$CHR)
+  
+  test_fibrolast <- test_genomic_subsets(df_fibrolast, all_CpG_complete_with_test)
+  
+  study_comparison[5, ] <-
+    c("He et al., 2019a",
+      "deprived fibrolast",
+      56151,
+      test_fibrolast$pearson_test_result$p.value,
+      test_fibrolast$kw_test_result$p.value
+    )
+  
+  study_comparison$bonferroni.correction <-  pmin(as.numeric(study_comparison$`p.val comparison with tempral shift pearson test`) * nrow(study_comparison), 1)
+  study_comparison$`# CpG` <- as.numeric(study_comparison$`# CpG`)
+  study_comparison$`p.val comparison with tempral shift pearson test` <- as.numeric(  study_comparison$`p.val comparison with tempral shift pearson test`)
+  write.xlsx(study_comparison, file.path(
+    "other_pubs","TableS4.xlsx"))
+  
+  # Display the first few rows of the DataFrame
+  head(df_bangladesh)
+
   GH <-
     list(
       ID = "GH05J143394",
@@ -3596,6 +3795,7 @@ if (describe_Data) {
   #   ) +
   #   coord_flip()
   
+  # Figure S1
   p <- ggplot(data = plot_meta, mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
     geom_point(size = 3, alpha = 0.6) +  # Enhanced points for better visibility
     geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP + age_std_BP),
@@ -3616,7 +3816,7 @@ if (describe_Data) {
     ) +
     ylab("Years Before Present (B.P.)") +
     xlab("Sample ID") +
-    scale_color_discrete(name = "Lifestyle/Diet") +  # Clarified legend title
+    scale_color_discrete(name = "Lifestyle") +  # Clarified legend title
     coord_flip()  # Flipping coordinates for horizontal layout
   
   ggsave(
@@ -4744,6 +4944,7 @@ if (aggregate_horizontal_results) {
 }
 # plot landscape -------------------------------------------------------
 if (plot_landscape) {
+  library(plotly)
   
   load_variable_if_not_exists(
     variable_name =  "df_peak_CpG_complete_with_test" ,
@@ -4756,6 +4957,11 @@ if (plot_landscape) {
   test <- "KW"
   min_real_count <- 2
   
+  load_variable_if_not_exists(
+    variable_name =  "df_empirical_means" ,
+    file_path = file.path(OUTPUT_FOLDER, paste(test,"df_horizontal_column_empirical_means.rds",sep = "."))
+  )
+  # df_horizontal_column_empirical_means.rds "df_CpG_vertical_empirical_means.rds"
   
   # min(best_CpGs$start)
   # [1] 29633535
@@ -4787,16 +4993,16 @@ if (plot_landscape) {
   
   plot <- layout(plot, scene = list(
     xaxis = list(
-      title = 'Minimum delta methylation',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for X axis title
+      title = '\u03B4<sub>meth</sub>',
+      titlefont = list(size = 30, color = "black", family = "Arial, bold")  # Specify bold font for X axis title
     ),
     yaxis = list(
-      title = '-log(p_value)',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for Y axis title
+      title = '-log(p<sub>value</sub>)',
+      titlefont = list(size = 30, color = "black", family = "Arial, bold")  # Specify bold font for Y axis title
     ),
     zaxis = list(
-      title = 'Observed vs. Expected',
-      titlefont = list(size = 18, color = "black", family = "Arial, bold")  # Specify bold font for Z axis title
+      title = 'observed versus null',
+      titlefont = list(size = 30, color = "black", family = "Arial, bold")  # Specify bold font for Z axis title
     )
   ))
   
@@ -4831,7 +5037,7 @@ if (plot_landscape) {
     showWarnings = FALSE
   )
   
-  
+  #figure 3A Figure S
   saveRDS(
     object = best_CpGs,
     file = file.path(OUTPUT_FOLDER,
@@ -4894,7 +5100,20 @@ if (pearson_landscape) {
   test <- "pearson"
   min_real_count <- 1
   
-  search_df <-
+  load_variable_if_not_exists(
+    variable_name =  "df_empirical_means" ,
+    file_path = file.path(OUTPUT_FOLDER, paste(test,"df_CpG_vertical_empirical_means.rds",sep = "."))
+  )
+  rm(df_empirical_means)
+  gc()
+  load_variable_if_not_exists(
+    variable_name =  "df_empirical_means" ,
+    file_path = file.path(OUTPUT_FOLDER, paste(test,"df_horizontal_column_empirical_means.rds",sep = "."))
+  )
+  
+  
+  
+    search_df <-
     df_empirical_means[df_empirical_means$minus_log_alpha >= min_alpha &
                          df_empirical_means$minus_log_alpha <= max_alpha &
                          df_empirical_means$min_delta > min_delta &
