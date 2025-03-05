@@ -3009,6 +3009,123 @@ if (FALSE) {
   )
   
   
+  ## reviewer control figure : major comment
+  
+  # Compute mean and variance of methylation for each sample
+  df_methylation_stats <- all_CpG_complete_with_test %>%
+    select(all_of(as.character(meta$sample))) %>%
+    summarise(across(everything(), list(Mean_Methylation = ~mean(.x, na.rm = TRUE), 
+                                        Variance_Methylation = ~var(.x, na.rm = TRUE)))) %>%
+    pivot_longer(cols = everything(), names_to = c("sample", ".value"), names_sep = "_")
+  
+  # Merge with metadata
+  df_meta_methylation <- merge(meta, df_methylation_stats, by = "sample")
+
+  # Scatter plot for mean methylation with variance as error bars
+  ggplot(df_meta_methylation, aes(x = age_mean_BP, y = Mean,color = df_meta_methylation$Type )) +
+    geom_point(size = 3) +  # Mean methylation points
+    geom_errorbar(aes(ymin = Mean - sqrt(Variance), 
+                      ymax = Mean + sqrt(Variance)), 
+                  width = 0, color = "gray50") +  # Error bars
+    scale_x_reverse() +  # Reverse time axis so older samples are on the left
+    theme_minimal() +
+    labs(
+      x = "Age (Years BP)",
+      y = "Mean Methylation Level",
+      title = "Mean Methylation Over Time with Variability",
+      caption = "Error bars represent sqrt(variance) as a measure of spread"
+    )
+  
+  
+  # Load required libraries
+  library(dplyr)
+  library(matrixStats)
+  
+  # Convert state_group to character to ensure correct comparison
+  all_CpG_complete_with_test$state_group <- as.character(all_CpG_complete_with_test$state_group)
+  
+  # Identify unique chromatin state groups
+  state_groups <- unique(all_CpG_complete_with_test$state_group)
+  
+  # Initialize an empty long-format data frame to store results
+  df_chromatin_variance_long <- data.frame(state_group = character(), Variance = numeric(), stringsAsFactors = FALSE)
+  
+  # Loop through each chromatin state group
+  for (state in state_groups) {
+    print(paste("Processing Chromatin State Group:", state))  # Print current state
+    
+    # Filter data to include only rows corresponding to the current chromatin state
+    df_subset <- all_CpG_complete_with_test[all_CpG_complete_with_test$state_group == state, ] 
+    
+    # Select only numeric sample columns (biosamples)
+    df_numeric <- df_subset %>% select(all_of(meta$sample))
+    
+    # Ensure conversion to numeric matrix
+    df_numeric <- as.matrix(df_numeric)
+    df_numeric <- apply(df_numeric, 2, as.numeric)  # Convert all columns to numeric
+    
+    # Compute row-wise variance for all CpG sites
+    variance_values <- rowVars(df_numeric, na.rm = TRUE)
+    
+    # Create a long-format data frame with all variance values and chromatin state labels
+    df_variance_state <- data.frame(state_group = rep(state, length(variance_values)), Variance = variance_values)
+    
+    # Append results to the long-format data frame
+    df_chromatin_variance_long <- rbind(df_chromatin_variance_long, df_variance_state)
+  }
+  
+  # Print the first rows of the final long-format variance table
+  head(df_chromatin_variance_long)
+  
+  # Load required libraries
+  library(dplyr)
+  library(ggplot2)
+  
+  # Compute mean variance and standard error (SEM) for each chromatin state group
+  df_variance_summary <- df_chromatin_variance_long %>%
+    group_by(state_group) %>%
+    summarise(
+      Mean_Variance = mean(Variance, na.rm = TRUE),
+      SEM = sd(Variance, na.rm = TRUE) / sqrt(n())
+    ) %>%
+    arrange(desc(Mean_Variance))
+  
+  # Print summary data
+  print(df_variance_summary)
+  
+  # Load required libraries
+  library(dplyr)
+  library(ggplot2)
+  
+  # Ensure state_group and Group are of the same type
+  df_universal_annotation$Group <- as.character(df_universal_annotation$Group)
+  df_variance_summary$state_group <- as.character(df_variance_summary$state_group)
+  
+  # Merge color information based on state_group
+  df_variance_summary <- df_variance_summary %>%
+    left_join(df_universal_annotation, by = c("state_group" = "Group"))
+  
+  # Print to verify merging
+  head(df_variance_summary)
+  
+  
+  # Create a bar plot with error bars (SEM)
+  ggplot(df_variance_summary, aes(x = reorder(state_group, Mean_Variance), y = Mean_Variance, fill = state_group)) +
+    geom_bar(stat = "identity", show.legend = FALSE) +
+    geom_errorbar(aes(ymin = Mean_Variance - SEM, ymax = Mean_Variance + SEM), width = 0.3, color = "black") +
+    coord_flip() +  # Flip axes for better readability
+    theme_minimal() +
+    labs(
+      x = "Chromatin State Group",
+      y = "Mean Variance of CpG Methylation",
+      title = "Mean Variance of CpG Methylation Across Chromatin State Groups",
+      caption = "Error bars represent SEM (Standard Error of the Mean)"
+    ) +
+    theme(axis.text.y = element_text(size = 10), axis.title.y = element_text(size = 12))
+  
+  
+  ## end reviewer insert 
+  
   counts_sig_min_delta_slope$total <-
     rep(x = counts_min_delta$n, each = 2)
   
