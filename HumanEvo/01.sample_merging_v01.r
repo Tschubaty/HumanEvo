@@ -100,44 +100,40 @@ meta_data <- meta_data[,c("sample", "Coverage" ,"age mean (BP)", "age std (BP)",
 # chr <- CHR_NAMES[22]
 # file_nr <- 1
 
-for(chr in CHR_NAMES){
-  
-  print(chr)
+# Load required library
+library(dplyr)
 
-for(file_nr in 1:nrow(meta_data)){
+for (chr in CHR_NAMES) {
+  print(chr)
   
-  start.time <- Sys.time()
-  print(file_nr)
-  print(meta_data$sample[file_nr])
+  df <- NULL  # Initialize empty dataframe
   
-  if(file_nr == 1){
+  for (file_nr in 1:nrow(meta_data)) {
+    start.time <- Sys.time()
+    print(file_nr)
+    print(meta_data$sample[file_nr])
     
+    # Read CpG data for the sample
+    bed <- read.delim(file = file.path(INPUT_FOLDER, meta_data$sample[file_nr], paste(meta_data$sample[file_nr], chr, "bed", sep = ".")))
     
-    bed_header <- read.delim(file = file.path(INPUT_FOLDER,meta_data$sample[file_nr],paste(meta_data$sample[file_nr],chr,"bed",sep = ".")))
-    bed <- bed_header
-    bed_header$score = NaN
-    bed_header$name = NaN
-    df <- data.frame(matrix(nrow = nrow(bed_header), ncol = nrow(meta_data)))
- 
-  }else{
-        bed <- read.delim(file = file.path(INPUT_FOLDER,meta_data$sample[file_nr],paste(meta_data$sample[file_nr],chr,"bed",sep = ".")))
+    # Rename columns for merging
+    colnames(bed) <- c("chrom", "start", "end", "score")
+    
+    # Merge all CpG positions correctly
+    if (is.null(df)) {
+      df <- bed  # First sample initializes the dataframe
+    } else {
+      df <- full_join(df, bed, by = c("chrom", "start", "end"))  # Ensures CpGs are correctly aligned
+    }
+    
+    colnames(df)[ncol(df)] <- meta_data$sample[file_nr]  # Rename column to sample name
+    
+    end.time <- Sys.time()
+    print(end.time - start.time)
   }
   
-  colnames(df)[file_nr] <- meta_data$sample[file_nr]
-  df[,file_nr] <- bed$score
-  
-  end.time <- Sys.time()
-  time.taken <- end.time - start.time
-  print(time.taken)
-}
-  
-  
-  df <- cbind(bed_header,df)
-  
+  # Save the merged data
   saveRDS(object = df,
-          file = file.path(OUTPUT_FOLDER,
-                           paste(chr,nrow(meta_data),"samples","rds",sep = ".")))
-  print(paste(chr,"saved"))
+          file = file.path(OUTPUT_FOLDER, paste(chr, nrow(meta_data), "samples", "rds", sep = ".")))
+  print(paste(chr, "saved"))
 }
-
-

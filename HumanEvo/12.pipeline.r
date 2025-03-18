@@ -1021,7 +1021,7 @@ plot_food_correlation <- function(df_row, typisation) {
 if (H3K27ac_Analysis) {
   
   load_variable_if_not_exists(
-    variable_name = "all_CpG.39.samples.merged.hg1",
+    variable_name = "all_CpG.39.samples.merged.hg19",
     file_path = "methylation+chip/all_CpG.39.samples.merged.hg19.rds"
   )
   
