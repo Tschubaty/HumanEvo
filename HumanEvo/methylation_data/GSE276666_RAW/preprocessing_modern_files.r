@@ -16,7 +16,7 @@ library(dplyr)
 library(BSgenome.Hsapiens.UCSC.hg19)#
 library(data.table)  # Faster data handling
 
-# Set working directory
+#Set working directory ####################
 cluster <- FALSE
 if (cluster) {
   this.dir <- "/ems/elsc-labs/meshorer-e/daniel.batyrev/HumanEvo/HumanEvo/"
@@ -30,6 +30,7 @@ output_dir <- file.path(this.dir, "methylation_data")
 if (!dir.exists(output_dir)) {
   dir.create(output_dir, recursive = TRUE)
 }
+
 
 # Load or Create CpG Sites Data --------------------------------------------
 if (FALSE) {
@@ -119,272 +120,467 @@ read_bismark_file <- function(file_path) {
 }
 
 # Process Bismark Methylation Files ----------------------------------------
-file_list <- list.files(path = this.dir,
-                        pattern = "deduplicated.bismark.cov$",
-                        full.names = TRUE)
-
-for (file_path in file_list) {
-  # Extract sample ID
-  sample_id <- gsub(".*?(S[0-9]+).*", "\\1", basename(file_path))
-  sample_dir <- file.path(output_dir, sample_id)  # Create sample-specific folder
+if (FALSE) {
+  file_list <- list.files(path = this.dir,
+                          pattern = "deduplicated.bismark.cov$",
+                          full.names = TRUE)
   
-  message("Processing new sample: ", sample_id)
-  
-  # Create folder for the sample
-  dir.create(sample_dir, recursive = TRUE)
-  
-  # Read methylation data
-  sample_data <- read_bismark_file(file_path)
-  
-  # Convert to `data.table` for speed
-  setDT(sample_data)
-  
-  # Split by chromosome
-  sample_list <- split(sample_data, sample_data$chrom)
-  
-  for (chr in paste0("chr", 1:22)) {
-    message("Processing chromosome: ", chr)
+  for (file_path in file_list) {
+    # Extract sample ID
+    sample_id <- gsub(".*?(S[0-9]+).*", "\\1", basename(file_path))
+    sample_dir <- file.path(output_dir, sample_id)  # Create sample-specific folder
     
-    chr_output_file <- file.path(sample_dir, paste0(chr, ".bed"))
+    message("Processing new sample: ", sample_id)
     
-    # if (file.exists(chr_output_file)) {
-    #   message("Chromosome ", chr, " already processed: Skipping")
-    #   next
-    # }
+    # Create folder for the sample
+    dir.create(sample_dir, recursive = TRUE)
     
-    if (chr %in% names(sample_list)) {
-      # Assuming sample_data is a data.table
-      # Add placeholder columns
+    # Read methylation data
+    sample_data <- read_bismark_file(file_path)
+    
+    # Convert to `data.table` for speed
+    setDT(sample_data)
+    
+    # Split by chromosome
+    sample_list <- split(sample_data, sample_data$chrom)
+    
+    for (chr in paste0("chr", 1:22)) {
+      message("Processing chromosome: ", chr)
       
-      sample_data_chr <- sample_list[[chr]]
+      chr_output_file <- file.path(sample_dir, paste0(chr, ".bed"))
       
-      setDT(sample_data_chr)
+      # if (file.exists(chr_output_file)) {
+      #   message("Chromosome ", chr, " already processed: Skipping")
+      #   next
+      # }
       
-      sample_data_chr[, `:=`(
-        name = ".",     # Placeholder for the 'name' field
-        score = 0,      # Placeholder for the 'score' field
-        strand = "."    # Placeholder for the 'strand' field
-      )]
+      if (chr %in% names(sample_list)) {
+        # Assuming sample_data is a data.table
+        # Add placeholder columns
+        
+        sample_data_chr <- sample_list[[chr]]
+        
+        setDT(sample_data_chr)
+        
+        sample_data_chr[, `:=`(name = ".",
+                               # Placeholder for the 'name' field
+                               score = 0,
+                               # Placeholder for the 'score' field
+                               strand = "."    # Placeholder for the 'strand' field
+                               )
+                               ]
+                               
+                               # Reorder columns to match BED format
+                               sample_data_chr <- sample_data_chr[, .(
+                                 chrom,
+                                 start,
+                                 end,
+                                 name,
+                                 score,
+                                 strand,
+                                 Methylation_Percentage,
+                                 Count_Methylated,
+                                 Count_Unmethylated
+                               )]
+                               
+                               
+      } else {
+        print(paste0(chr, "not canonical chromosem"))
+        sample_data_chr <- NA
+        
+      }
       
-      # Reorder columns to match BED format
-      sample_data_chr <- sample_data_chr[, .(chrom, start, end, name, score, strand, Methylation_Percentage, Count_Methylated, Count_Unmethylated)]
-      
-      
-    } else {
-      print(paste0(chr,"not canonical chromosem"))
-      sample_data_chr <- NA
-
+      # Save processed chromosome data in bed format
+      header_line <- paste0("#", paste(colnames(sample_data_chr), collapse = "\t"))
+      writeLines(header_line, chr_output_file)  # Write header
+      fwrite(
+        sample_data_chr,
+        file = chr_output_file,
+        sep = "\t",
+        col.names = FALSE
+      )
     }
     
-    # Save processed chromosome data in bed format
-    header_line <- paste0("#", paste(colnames(sample_data_chr), collapse = "\t"))
-    writeLines(header_line, chr_output_file)  # Write header
-    fwrite(sample_data_chr,
-           file = chr_output_file,
-           sep = "\t",
-           col.names = FALSE)
+    # Clean up memory
+    # rm(sample_data, merged_chr)
+    gc()
   }
   
+  # Final Message
+  message("Processing complete! Each chromosome saved separately in sample-specific folders.")
+}
+
+dirs <- list.dirs(path = file.path(this.dir, "methylation_data"),
+                  recursive = FALSE)
+sample_dirs <- grep("^S.*", basename(dirs), value = TRUE)
+
+# merge to on edataframe #########################################
+if (FALSE) {
+  
+  library(data.table)
+  library(zoo)  # For moving average
+  
+  #' Smooth methylation values using a moving window
+  #'
+  #' @param df A data.table containing columns: chrom, start, end, Count_Methylated, Count_Unmethylated.
+  #' @param winsize Size of the smoothing window (default = 5).
+  #' @param new_col_name Name of the new column storing smoothed values.
+  #' @return A data.table with an additional column for smoothed methylation values.
+  smooth_methylation <- function(df, winsize = 11, new_col_name = "smoothed_meth") {
+    # Check required columns
+    required_cols <- c("chrom", "start", "end", "Count_Methylated", "Count_Unmethylated")
+    if (!all(required_cols %in% names(df))) {
+      stop("Input data.table must contain columns: chrom, start, end, Count_Methylated, Count_Unmethylated")
+    }
+    
+    # Compute total reads
+    df[, total_reads := Count_Methylated + Count_Unmethylated]
+    
+    # Compute raw methylation level (C / (C + T)), avoiding division by zero
+    df[, meth_level := fifelse(total_reads > 0, Count_Methylated / total_reads, NA_real_)]
+    
+    # Apply a moving average for smoothing
+    df[, (new_col_name) := rollapply(meth_level, width = winsize, FUN = mean, na.rm = TRUE, fill = NA, align = "center")]
+    
+    # Drop intermediate columns
+    df[, c("total_reads", "meth_level") := NULL]
+    
+    # Return modified data.table
+    return(df)
+  }
+  
+  
+  # Set output directory
+  output_dir <- "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation_data_chr_merged"
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+
+  
+  
+  for (chr in paste0("chr", 1:22)) {
+    # chr <- paste0("chr", 1:22)[22]
+    message("Processing chromosome: ", chr)
+    
+    df_modern <- data.frame()
+    
+    for (biosample in sample_dirs) {
+      # biosample <-  sample_dirs[1]
+      
+      
+      
+      chr_file <- file.path(this.dir,
+                            "methylation_data",
+                            biosample,
+                            paste0(chr, "_mapped.bed"))
+      chr_output_file <- file.path(this.dir,
+                                   "methylation_data",
+                                   biosample,
+                                   paste0(biosample, ".", chr, ".bed"))
+      
+      df <- read.delim(
+        chr_file,
+        sep = "\t",
+        header = FALSE,
+        stringsAsFactors = FALSE
+      )
+      print(dim(df))
+      colnames(df) <- c("chrom",
+                        "start",
+                        "end" ,
+                        "Count_Methylated",
+                        "Count_Unmethylated")
+      
+      
+      df[, biosample] <- df$Count_Methylated / (df$Count_Methylated + df$Count_Unmethylated)
+      
+      # Save processed chromosome data in bed format
+      header_line <- paste0("#", paste(colnames(df[, c("chrom", "start", "end", biosample)]), collapse = "\t"))
+      writeLines(header_line, chr_output_file)  # Write header
+      fwrite(df[, c("chrom", "start", "end", biosample)],
+             file = chr_output_file,
+             sep = "\t",
+             col.names = FALSE,
+             append = TRUE)
+      
+      if (biosample == sample_dirs[1]) {
+        df_modern <- df[, c("chrom", "start", "end", biosample)]
+      } else{
+        #df_modern <- cbind(df_modern, biosample = df[, biosample])
+        df_modern[[biosample]] <- df[[biosample]]
+      }
+      
+    }
+    chr_output_file <- file.path(this.dir,
+                                 "methylation_data",
+                                 paste0("modern_sample", ".", chr, ".bed"))
+    header_line <- paste0("#", paste(colnames(df_modern), collapse = "\t"))
+    writeLines(header_line, chr_output_file)  # Write header
+    fwrite(df_modern,
+           file = chr_output_file,
+           sep = "\t",
+           col.names = FALSE,
+           append = TRUE)
+    
+    
+  }
   # Clean up memory
   # rm(sample_data, merged_chr)
   gc()
 }
 
-# Final Message
-message("Processing complete! Each chromosome saved separately in sample-specific folders.")
-#####################################################################################################################################
+if (FALSE) {
+  # Set output directory
+  output_dir <- "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation_data_chr_merged"
+  if (!dir.exists(output_dir)) {
+    dir.create(output_dir, recursive = TRUE)
+  }
+  
+  input_dir_modern <- file.path(this.dir,
+                                "methylation_data")
 
-# # **Optimized Function: Merge CpG Data in Linear Time with Debugging**
-# sum_methylation_fast <- function(cpg_chr, sample_chr) {
-#   # **Initialize Progress Bar**
-#   pb <- txtProgressBar(min = 0,
-#                        max = nrow(cpg_chr),
-#                        style = 3)
-#   
-#   # debug:
-#   # cpg_chr <- cpg_list[[chr]]
-#   # sample_chr <- sample_list[[chr]]
-#   #
-#   # sample_chr[(sample_index - 2):(sample_index + 2),]
-#   # test_indx <- which(sample_chr$start[sample_index-5] <= cpg_chr$start   & cpg_chr$end  <= sample_chr$start[sample_index+5])
-#   #
-#   # cpg_chr[test_indx,]
-#   
-#   # **Ensure both inputs contain only one chromosome**
-#   unique_cpg_chrom <- unique(cpg_chr$chrom)
-#   unique_sample_chrom <- unique(sample_chr$chrom)
-#   
-#   if (length(unique_cpg_chrom) > 1 ||
-#       length(unique_sample_chrom) > 1 ||
-#       unique_cpg_chrom != unique_sample_chrom) {
-#     stop(
-#       "Error: cpg_chr and sample_chr must contain data for exactly one and the same chromosome."
-#     )
-#   }
-#   
-#   #message("Processing Chromosome: ", unique_cpg_chrom)
-#   
-#   # **Ensure both data.tables are sorted**
-#   setkey(cpg_chr, chrom, start)
-#   setkey(sample_chr, chrom, start)
-#   
-#   # **Initialize pointers**
-#   sample_index <- 1
-#   n_samples <- nrow(sample_chr)
-#   
-#   # **Initialize results table**
-#   cpg_chr[, `:=`(Count_Methylated = 0,
-#                  Count_Unmethylated = 0)]
-#   
-#   # **Loop through CpG sites (linear time merge)**
-#   for (i in seq_len(nrow(cpg_chr))) {
-#     # **Update Progress Bar**
-#     setTxtProgressBar(pb, i)
-#     
-#     reference_indx_start <- cpg_chr$start[i]
-#     reference_indx_end <- cpg_chr$end[i]
-#     
-#     # Debug message for current CpG site
-#     #message("Processing CpG site: ", reference_indx_start, "-", reference_indx_end)
-#     
-#     # Initialize an empty data.table to store unmatched rows
-#     #unmatched_samples <- data.table()
-#     
-#     # **Collect unmatched rows instead of throwing an error**
-#     while (sample_index <= n_samples &&
-#            sample_chr$end[sample_index] < reference_indx_start) {
-#       # message(paste("Error: Sample CpG missed:", sample_chr$start[sample_index],
-#       #            "exceeds CpG region", reference_indx_start, "-", reference_indx_end,
-#       #            "at sample index", sample_index," and cpg_chr index ",i))
-#       
-#       # Append the unmatched row to `unmatched_samples`
-#       #unmatched_samples <- rbind(unmatched_samples, sample_chr[sample_index, ], fill = TRUE)
-#       
-#       # Move to the next sample row
-#       sample_index <- min(sample_index + 1, n_samples)
-#     }
-#     
-#     
-#     while (sample_chr$start[sample_index] <= reference_indx_end) {
-#       # **Accumulate counts**
-#       cpg_chr$Count_Methylated[i] <- cpg_chr$Count_Methylated[i] + sample_chr$Count_Methylated[sample_index]
-#       cpg_chr$Count_Unmethylated[i] <- cpg_chr$Count_Unmethylated[i] + sample_chr$Count_Unmethylated[sample_index]
-#       
-#       # **Move to next sample**
-#       sample_index <- min(sample_index + 1, n_samples)  # Prevent out-of-bounds access
-#     }
-#   }
-#   
-#   # **Handle sites with no reads (set to NA instead of 0)**
-#   cpg_chr[Count_Methylated == 0 & Count_Unmethylated == 0, `:=`(
-#     Count_Methylated = NA,
-#     Count_Unmethylated = NA,
-#     Methylation_Percentage = NA
-#   )]
-#   
-#   # **Compute Methylation Percentage**
-#   cpg_chr[, Methylation_Percentage := ifelse(Count_Methylated + Count_Unmethylated > 0,
-#                                              (Count_Methylated / (Count_Methylated + Count_Unmethylated)) * 100,
-#                                              NA)]
-#   
-#   # **Close Progress Bar**
-#   close(pb)
-#   
-#   return(cpg_chr)
-# }
+  
+  for (chr in paste0("chr", 1:22)) {
+    # chr <- paste0("chr", 1:22)[22]
+    message("Processing chromosome: ", chr)
+    
+    df_modern <- read.delim(file = file.path(input_dir_modern,paste0("modern_sample.",chr,".bed")))
+    df_ancient <- readRDS(file = file.path(output_dir,paste0(chr,".39.samples.rds")))
+    df_combined <- cbind(df_ancient,df_modern[, -(1:3)])
+    saveRDS(object = df_combined,file = file.path(output_dir,paste0(chr,".45.samples.rds")))  
+    
+  }
+  # Clean up memory
+  # rm(sample_data, merged_chr)
+  gc()
+}
+
+if(FALSE) {
+  df_combined_modern <- data.frame()
+  for (chr in paste0("chr", 1:22)) {
+    # chr <- paste0("chr", 1:22)[22]
+    message("Processing chromosome: ", chr)
+    
+    df_combined <- read.delim(file = file.path(output_dir, paste0("modern_sample.",chr, ".bed")))
+    df_combined_modern <- rbind(df_combined_modern, df_combined)
+  }
+  # Clean up memory
+  # rm(sample_data, merged_chr)
+  gc()
+  
+}
+
+all_CpG.39.samples.merged.hg19 <- readRDS("C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/all_CpG.39.samples.merged.hg19.rds")
+all_CpG.45.samples.merged.hg19 <- cbind(all_CpG.39.samples.merged.hg19, df_combined_modern[,sample_dirs])
+saveRDS(object = all_CpG.45.samples.merged.hg19, 
+        file = "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/all_CpG.45.samples.merged.hg19.rds")
 
 
-#' # Process Bismark Methylation Files ----------------------------------------
-#' file_list <- list.files(path = this.dir,
-#'                         pattern = "deduplicated.bismark.cov$",
-#'                         full.names = TRUE)
-#' 
-#' for (file_path in file_list) {
-#'   # Extract sample ID
-#'   sample_id <- gsub(".*?(S[0-9]+).*", "\\1", basename(file_path))
-#'   sample_dir <- file.path(output_dir, sample_id)  # Create sample-specific folder
-#'   
-#'   message("Processing new sample: ", sample_id)
-#'   
-#'   # Create folder for the sample
-#'   dir.create(sample_dir, recursive = TRUE)
-#'   
-#'   # Read methylation data
-#'   sample_data <- read_bismark_file(file_path)
-#'   
-#'   # Convert to `data.table` for speed
-#'   setDT(cpg_df)
-#'   setDT(sample_data)
-#'   
-#'   # Split by chromosome
-#'   cpg_list <- split(cpg_df, cpg_df$chrom)
-#'   sample_list <- split(sample_data, sample_data$chrom)
-#'   
-#'   for (chr in names(cpg_list)) {
-#'     message("Processing chromosome: ", chr)
-#'     
-#'     chr_output_file <- file.path(sample_dir, paste0(chr, ".rds"))
-#'     
-#'     # if (file.exists(chr_output_file)) {
-#'     #   message("Chromosome ", chr, " already processed: Skipping")
-#'     #   next
-#'     # }
-#'     
-#'     if (chr %in% names(sample_list)) {
-#'       # Use fast summation method
-#'       merged_chr <- sum_methylation_fast(cpg_list[[chr]], sample_list[[chr]])
-#'     } else {
-#'       # If no sample data for this chromosome, keep NA values
-#'       merged_chr <- cpg_list[[chr]]
-#'       merged_chr[, `:=`(
-#'         Count_Methylated = NA,
-#'         Count_Unmethylated = NA,
-#'         Methylation_Percentage = NA
-#'       )]
-#'     }
-#'     
-#'     # Save processed chromosome data
-#'     saveRDS(merged_chr, file = chr_output_file)
-#'   }
-#'   
-#'   # Clean up memory
-#'   # rm(sample_data, merged_chr)
-#'   gc()
-#' }
-#' 
-#' # Final Message
-#' message("Processing complete! Each chromosome saved separately in sample-specific folders.")
-#' 
-#' 
-#' #' Smooth Methylation Data Using Moving Average Filter
-#' #'
-#' #' This function applies a smoothing window to methylation counts using a moving average filter.
-#' #'
-#' #' @param chrom_data A data table containing columns `Count_Methylated` and `Count_Methylated + Count_Unmethylated`.
-#' #' @param winsize The window size for smoothing (must be an odd integer).
-#' #'
-#' #' @return A data table with smoothed methylation counts and total reads.
-#' #'
-#' #' @importFrom stats filter
-#' #' @export
-#' smooth_methylation <- function(chrom_data, winsize) {
-#'   if (winsize %% 2 == 0)
-#'     stop("Window size must be an odd integer")
-#'   
-#'   # Define convolution kernel (equal weights for moving average)
-#'   kernel <- rep(1 / winsize, winsize)
-#'   
-#'   # Apply moving average filter (preserve NA values)
-#'   chrom_data[, Smoothed_Count_Methylated := stats::filter(Count_Methylated,
-#'                                                           kernel,
-#'                                                           sides = 2,
-#'                                                           circular = FALSE)]
-#'   chrom_data[, Smoothed_Total_Reads := stats::filter(
-#'     Count_Methylated + Count_Unmethylated,
-#'     kernel,
-#'     sides = 2,
-#'     circular = FALSE
-#'   )]
-#'   
-#'   return(chrom_data)
-#' }
+saveRDS(object = all_CpG.45.samples.merged.hg19[all_CpG.45.samples.merged.hg19$name != "NO_CHIP",],
+        file = "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/H3K27ac.only.45.samples.merged.hg19.rds")
+
+# soothin#######################################################
+library(data.table)
+library(zoo)  # For moving average
+
+#' Smooth methylation values using a moving window
+#'
+#' @param df A data.table containing columns: chrom, start, end, Count_Methylated, Count_Unmethylated.
+#' @param winsize Size of the smoothing window (default = 5).
+#' @param new_col_name Name of the new column storing smoothed values.
+#' @return A data.table with an additional column for smoothed methylation values.
+smooth_methylation <- function(df, winsize = 5, new_col_name = "smoothed_meth") {
+  # Check required columns
+  required_cols <- c("chrom", "start", "end", "Count_Methylated", "Count_Unmethylated")
+  if (!all(required_cols %in% names(df))) {
+    stop("Input data.table must contain columns: chrom, start, end, Count_Methylated, Count_Unmethylated")
+  }
+  
+  # Compute total reads
+  df[, total_reads := Count_Methylated + Count_Unmethylated]
+  
+  # Compute raw methylation level (C / (C + T)), avoiding division by zero
+  df[, meth_level := fifelse(total_reads > 0, Count_Methylated / total_reads, NA_real_)]
+  
+  # Apply a moving average for smoothing
+  df[, (new_col_name) := rollapply(meth_level, width = winsize, FUN = mean, na.rm = TRUE, fill = NA, align = "center")]
+  
+  # Drop intermediate columns
+  df[, c("total_reads", "meth_level") := NULL]
+  
+  # Return modified data.table
+  return(df)
+}
+
+
+#estimate original smoothing: #####################################################################
+
+if(FALSE){
+  
+
+  
+library(data.table)
+library(ggplot2)
+
+  # Custom autocorrelation function that ignores NA values
+  custom_acf <- function(x, max_lag = 100) {
+    n <- length(x)
+    acf_vals <- numeric(max_lag + 1)
+    
+    for (lag in 0:max_lag) {
+      valid_indices <- which(!is.na(x[1:(n - lag)]) & !is.na(x[(lag + 1):n]))  # Only valid pairs
+      if (length(valid_indices) > 0) {
+        acf_vals[lag + 1] <- cor(x[valid_indices], x[valid_indices + lag], use = "pairwise.complete.obs")
+      } else {
+        acf_vals[lag + 1] <- NA
+      }
+    }
+    
+    return(acf_vals)
+  }  
+  
+  
+all_CpG.39.samples.merged.hg19 <- readRDS("C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation+chip/all_CpG.39.samples.merged.hg19.rds")
+raw_data <- read.delim(
+  "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation_data/GSE276666_RAW/methylation_data/S1148/S1148.chr1.bed",
+  sep = "\t",
+  header = TRUE,
+  stringsAsFactors = FALSE
+)
+df_raw <- raw_data$S1148
+
+# Compute ACF with missing values handled correctly
+acf_values <- custom_acf(df_raw, max_lag = 100)
+
+# Create ACF DataTable
+acf_df <- data.table(lag = 0:100, acf = acf_values)
+
+# Plot ACF
+ggplot(acf_df, aes(x = lag, y = acf)) +
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept = 0.37, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = paste0("Autocorrelation Function (ACF) of raw data ","S1148"),
+       x = "Lag (Genomic Positions)",
+       y = "Autocorrelation")
+
+# Estimate smoothing window where ACF drops below 0.37
+estimated_window <- min(acf_df[acf < 0.37]$lag, na.rm = TRUE)
+
+
+
+# smoothing
+# Load example data
+df <- fread("C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/methylation_data/GSE276666_RAW/methylation_data/S1148/chr1_mapped.bed",
+            header = FALSE, col.names = c("chrom", "start", "end", "Count_Methylated", "Count_Unmethylated"))
+
+# Apply smoothing function with a window size of 5
+smoothed_df <- smooth_methylation(df, winsize = 21, new_col_name = "S1148")
+
+# View results
+head(smoothed_df)
+
+# Compute ACF with missing values handled correctly
+acf_values <- custom_acf(smoothed_df$S1148, max_lag = 100)
+
+# Create ACF DataTable
+acf_df <- data.table(lag = 0:100, acf = acf_values)
+
+# Plot ACF
+ggplot(acf_df, aes(x = lag, y = acf)) +
+  geom_line() +
+  geom_point() +
+  geom_hline(yintercept = 0.37, linetype = "dashed", color = "red") +
+  theme_minimal() +
+  labs(title = paste0("Autocorrelation Function (ACF) of window size 11 smoothed data ","S1148"),
+       x = "Lag (Genomic Positions)",
+       y = "Autocorrelation")
+
+
+smoothing_estimates <- data.frame(biosamples = colnames(all_CpG.39.samples.merged.hg19)[7:ncol(all_CpG.39.samples.merged.hg19)],
+                                  estimation = NA)
+for(biosample in smoothing_estimates$biosamples) {
+  print(biosample)
+  df_meth <- all_CpG.39.samples.merged.hg19[all_CpG.39.samples.merged.hg19$chrom == "chr1", biosample]
+  
+  
+  # Compute ACF with missing values handled correctly
+  acf_values <- custom_acf(df_meth, max_lag = 100)
+  
+  # Create ACF DataTable
+  acf_df <- data.table(lag = 0:100, acf = acf_values)
+  
+  # Plot ACF
+  ggplot(acf_df, aes(x = lag, y = acf)) +
+    geom_line() +
+    geom_point() +
+    geom_hline(yintercept = 0.37,
+               linetype = "dashed",
+               color = "red") +
+    theme_minimal() +
+    labs(
+      title = paste0("Autocorrelation Function (ACF) of Smoothed Data ", biosample),
+      x = "Lag (Genomic Positions)",
+      y = "Autocorrelation"
+    )
+  
+  # Estimate smoothing window where ACF drops below 0.37
+  estimated_window <- min(acf_df[acf < 0.37]$lag, na.rm = TRUE)
+  
+  smoothing_estimates$estimation[which(smoothing_estimates$biosamples == biosample)] = estimated_window
+  
+  # Print estimated smoothing window
+  cat("Estimated Smoothing Window (Custom ACF):",
+      estimated_window,
+      "\n")
+}  
+
+
+## estimate secodn derivative: #############################
+
+library(data.table)
+library(ggplot2)
+
+smoothing_estimates <- data.frame(
+  biosamples = colnames(all_CpG.39.samples.merged.hg19)[7:ncol(all_CpG.39.samples.merged.hg19)],
+  estimation = NA
+)
+
+for(biosample in smoothing_estimates$biosamples) {
+  print(biosample)
+  df_meth <- all_CpG.39.samples.merged.hg19[all_CpG.39.samples.merged.hg19$chrom == "chr1", biosample]
+  
+  # Compute ACF with missing values handled correctly
+  acf_values <- custom_acf(df_meth, max_lag = 100)
+  
+  # Create ACF DataTable
+  acf_df <- data.table(lag = 0:100, acf = acf_values)
+  
+  # Compute discrete second derivative (slope change)
+  acf_df[, diff1 := c(NA, diff(acf))]
+  acf_df[, diff2 := c(NA, diff(diff1))]
+  
+  # Find lag with most negative second derivative (most curvature)
+  elbow_point <- acf_df[which.max(diff2), lag]
+  
+  # Plot ACF with elbow point
+  ggplot(acf_df, aes(x = lag, y = acf)) +
+    geom_line() +
+    geom_point() +
+    geom_vline(xintercept = elbow_point -1 , linetype = "dotted", color = "blue") +
+    geom_hline(yintercept = 0.37, linetype = "dashed", color = "red") +
+    theme_minimal() +
+    labs(
+      title = paste0("Autocorrelation Function (ACF) of Smoothed Data ", biosample),
+      x = "Lag (Genomic Positions)",
+      y = "Autocorrelation"
+    )
+  
+  # Save estimation
+  smoothing_estimates$estimation[which(smoothing_estimates$biosamples == biosample)] <- elbow_point
+  
+  cat("Estimated Smoothing Window (Elbow Point):", elbow_point, "\n")
+}
+}
