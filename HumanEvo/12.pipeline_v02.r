@@ -3488,7 +3488,7 @@ if (FALSE) {
   
   load_variable_if_not_exists(
     variable_name = "all_CpG_complete_with_test.45",
-    file_path = "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds"
+    file_path = file.path("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo","12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
   )
   
   OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation","min_delta",min_delta,sep = "."))
@@ -3574,7 +3574,7 @@ if (FALSE) {
              showWarnings = FALSE)
   
   for(chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
-
+  print(chromatin_group)
   true.pval <- all_CpG_complete_with_test.45$pearson.p_val[
     all_CpG_complete_with_test.45$state_group == chromatin_group & 
       all_CpG_complete_with_test.45$pearson.delta >= min_delta]
@@ -3770,7 +3770,7 @@ if (FALSE) {
   plot_df[, type := factor(type, levels = c("FDR", "True Hits", "Permuted Hits"))]
   
   ######### 4. Plot
-  ggplot(plot_df, aes(x = cutoff, y = value, group = permutation)) +
+  p <- ggplot(plot_df, aes(x = cutoff, y = value, group = permutation)) +
     geom_line(alpha = 0.4) +
     scale_x_log10(
       breaks = cutoffs,
