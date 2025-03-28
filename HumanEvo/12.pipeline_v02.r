@@ -3483,10 +3483,16 @@ if (FALSE) {
 }
 # Calculate state specific CpG permuation simulations dependent on delta --------------------------------------------------
 if (FALSE) {
-  min_delta <- 0.5
+  min_delta <- 0.3
   max_p <- 0.001
-  OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation",sep = "."))
-  OUTPUT_FOLDER_kw<- file.path(OUTPUT_FOLDER, paste("45.KW","CpG_permutation",sep = "."))
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds"
+  )
+  
+  OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation","min_delta",min_delta,sep = "."))
+  OUTPUT_FOLDER_kw<- file.path(OUTPUT_FOLDER, paste("45.KW","CpG_permutation","min_delta",min_delta,sep = "."))
   print("create_CpG_permutations_vertical")
   dir.create(path = OUTPUT_FOLDER_pearson,
              showWarnings = FALSE)
@@ -3494,18 +3500,20 @@ if (FALSE) {
   dir.create(path = OUTPUT_FOLDER_kw,
              showWarnings = FALSE)
   
-  n_repetitions <- 1
+  n_repetitions <- 5
   for (rep in 1:n_repetitions) {
     # rep <- 1
-    start_time <- Sys.time()
+    
     print(rep)
     
     time_string <- format(start_time, "%Y_%m_%d_%H_%M_%S")
     
     for(chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
+      start_time <- Sys.time()
       print(chromatin_group)
       # chromatin_group <- "TSS"
-      df_temp <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$state_group == chromatin_group,]
+      df_temp <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$state_group == chromatin_group & 
+                                                 all_CpG_complete_with_test.45$pearson.delta >= min_delta,]
 
     
     permutation_CpG <-
@@ -3525,13 +3533,12 @@ if (FALSE) {
     
     permutation_age$data <-
       parallel_testing_pearson_cor(df = df_permuted, age.typisation = real_age_typisation)
-    permutation_food$data <-
-      parallel_testing_kruskall_valis(df = df_permuted, food.typisation = real_food_typisation)
-    
+    print("parallel_testing_pearson_cor complete")
+
     # save age permutation
     sim_age_file_name <-
       paste(chromatin_group,
-        "pearson",
+            "pearson",
             "CpG_permutation",
             time_string,
             "rds",
@@ -3541,22 +3548,253 @@ if (FALSE) {
       file = file.path(OUTPUT_FOLDER_pearson, sim_age_file_name)
     )
     
-    # save food permutation
-    sim_food_file_name <-
-      paste(chromatin_group,
-            "KW",
-            "CpG_permutation",
-            time_string,
-            "rds",
-            sep = ".")
-    saveRDS(
-      object = permutation_food,
-      file = file.path(OUTPUT_FOLDER_kw, sim_food_file_name)
-    )
+    # permutation_food$data <-
+    #   parallel_testing_kruskall_valis(df = df_permuted, food.typisation = real_food_typisation)
+    # print("parallel_testing_kruskall_valis")
+    # # save food permutation
+    # sim_food_file_name <-
+    #   paste(chromatin_group,
+    #         "KW",
+    #         "CpG_permutation",
+    #         time_string,
+    #         "rds",
+    #         sep = ".")
+    # saveRDS(
+    #   object = permutation_food,
+    #   file = file.path(OUTPUT_FOLDER_kw, sim_food_file_name)
+    # )
     
     end_time <- Sys.time()
     print(end_time - start_time)
     }
+  }
+  
+  OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
+  dir.create(path = OUTPUT_FOLDER_pearson_plot,
+             showWarnings = FALSE)
+  
+  for(chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
+
+  true.pval <- all_CpG_complete_with_test.45$pearson.p_val[
+    all_CpG_complete_with_test.45$state_group == chromatin_group & 
+      all_CpG_complete_with_test.45$pearson.delta >= min_delta]
+  
+  # List of matching RDS files
+  state_group_permutation_age_files <- list.files(
+    path = OUTPUT_FOLDER_pearson,
+    pattern = paste0("^", chromatin_group, "\\.pearson\\.CpG_permutation\\."),
+    full.names = TRUE
+  )
+  
+  # Load and combine all p-values into one data.table
+  all_pvals <- rbindlist(lapply(state_group_permutation_age_files, function(f) {
+    df <- readRDS(f)$data
+    data.table(pval = df$pearson.p_val, file = basename(f))
+  }))
+  
+  # 1. Add true p-values as their own "file"
+  true_pvals_dt <- data.table(
+    pval = true.pval,
+    file = "true_data"
+  )
+  
+  # 2. Combine with permutation p-values
+  all_pvals_combined <- rbind(all_pvals, true_pvals_dt)
+  
+  # 3. Plot all p-values including true data
+  p <- ggplot(all_pvals_combined, aes(x = pval, fill = file)) +
+    geom_histogram(binwidth = 0.01, alpha = 0.5, position = "identity", color = NA) +
+    theme_minimal() +
+    labs(
+      title = paste("Permutation vs. True P-Values -", chromatin_group),
+      x = "Pearson p-value",
+      y = "Count",
+      fill = "Source"
+    ) +
+    xlim(0, 1)
+  
+  ggsave(
+    plot = p,
+    filename = file.path(OUTPUT_FOLDER_pearson_plot,
+      paste0(chromatin_group,".permutation_vs_true_data_p_value_destribution.png")),
+    width = 10,
+    height =10
+  )
+  
+  # positive vs negative 
+
+  # 1. TRUE DATA
+  true_filter <- all_CpG_complete_with_test.45$state_group == chromatin_group &
+    all_CpG_complete_with_test.45$pearson.delta >= min_delta
+  
+  true_pvals_dt <- data.table(
+    pval = all_CpG_complete_with_test.45$pearson.p_val[true_filter],
+    direction = ifelse(all_CpG_complete_with_test.45$pearson.statistic[true_filter] >= 0, "positive", "negative"),
+    file = "true_data"
+  )
+  
+  # 2. PERMUTATION FILES
+  state_group_permutation_age_files <- list.files(
+    path = OUTPUT_FOLDER_pearson,
+    pattern = paste0("^", chromatin_group, "\\.pearson\\.CpG_permutation\\."),
+    full.names = TRUE
+  )
+  
+  # 3. Load permutation p-values + direction
+  all_pvals <- rbindlist(lapply(state_group_permutation_age_files, function(f) {
+    df <- readRDS(f)$data
+    data.table(
+      pval = df$pearson.p_val,
+      direction = ifelse(df$pearson.statistic >= 0, "positive", "negative"),
+      file = basename(f)
+    )
+  }))
+  
+  # 4. Combine TRUE and PERMUTATION data
+  all_pvals_combined <- rbind(all_pvals, true_pvals_dt)
+  
+  # 5. Plot: histogram split by direction
+  p <- ggplot(all_pvals_combined, aes(x = pval, fill = file)) +
+    geom_histogram(binwidth = 0.01, alpha = 0.5, position = "identity", color = NA) +
+    facet_wrap(~direction) +
+    theme_minimal() +
+    labs(
+      title = paste("Permutation vs. True P-Values by Correlation Direction -", chromatin_group),
+      x = "Pearson p-value",
+      y = "Count",
+      fill = "Source"
+    ) +
+    xlim(0, 1)
+  
+  ggsave(
+    plot = p,
+    filename = file.path(OUTPUT_FOLDER_pearson_plot,
+                         paste0(chromatin_group,".histogram split by direction.png")),
+    width = 10,
+    height =10
+  )
+  
+  ######### FDR analyis
+  
+  # Define cutoff thresholds
+  cutoffs <- seq(0, 0.01, by = 0.00001)
+  
+  # Separate true p-values
+  true_vals <- all_pvals_combined[file == "true_data", pval]
+  
+  # Subset to permutation values
+  perm_vals_dt <- all_pvals_combined[file != "true_data"]
+  
+  # Get list of permutations
+  perm_files <- unique(perm_vals_dt$file)
+  
+  # Initialize list to store results
+  fdr_list <- lapply(perm_files, function(perm) {
+    this_perm_vals <- perm_vals_dt[file == perm, pval]
+    data.table(
+      cutoff = cutoffs,
+      true_hits = sapply(cutoffs, function(cut) sum(true_vals <= cut, na.rm = TRUE)),
+      null_hits = sapply(cutoffs, function(cut) sum(this_perm_vals <= cut, na.rm = TRUE)),
+      permutation = perm
+    )
+  })
+  
+  # Combine all into one long data.table
+  fdr_dt <- rbindlist(fdr_list)
+  
+  # Compute FDR for each permutation
+  fdr_dt[, FDR := ifelse(true_hits > 0, null_hits / true_hits, NA_real_)]
+  
+  # Plot FDR curves for each permutation
+  library(ggplot2)
+  
+  p <- ggplot(fdr_dt, aes(x = cutoff, y = FDR, group = permutation)) +
+    geom_line(alpha = 0.4, color = "gray40") +
+    theme_minimal() +
+    labs(
+      title = paste("FDR Curves by Permutation -", chromatin_group),
+      x = "p-value cutoff",
+      y = "False Discovery Rate"
+    ) +
+    ylim(0, 1)
+  
+  ggsave(
+    plot = p,
+    filename = file.path(OUTPUT_FOLDER_pearson_plot,
+                         paste0(chromatin_group,".FDR Curves by Permutation.png")),
+    width = 10,
+    height =10
+  )
+  
+  
+  ######### 1. Setup
+  # Define log10 cutoffs: 10^-1 to 10^-5
+  cutoffs <- cutoffs <- 10^seq(-2, -8, by = -0.1)
+
+
+  
+  # TRUE p-values
+  true_vals <- all_pvals_combined[file == "true_data", pval]
+  
+  # PERMUTATION p-values
+  perm_vals_dt <- all_pvals_combined[file != "true_data"]
+  perm_files <- unique(perm_vals_dt$file)
+  
+  ######### 2. Compute true & null hits + FDR per permutation
+  fdr_list <- lapply(perm_files, function(perm) {
+    this_perm_vals <- perm_vals_dt[file == perm, pval]
+    data.table(
+      cutoff = cutoffs,
+      true_hits = sapply(cutoffs, function(cut) sum(true_vals <= cut, na.rm = TRUE)),
+      null_hits = sapply(cutoffs, function(cut) sum(this_perm_vals <= cut, na.rm = TRUE)),
+      permutation = perm
+    )
+  })
+  
+  fdr_dt <- rbindlist(fdr_list)
+  fdr_dt[, FDR := ifelse(true_hits > 0, null_hits / true_hits, NA_real_)]
+  
+  ######### 3. Reshape for plotting
+  # FDR curves
+  fdr_dt[, type := "FDR"]
+  fdr_plot <- fdr_dt[, .(cutoff, value = FDR, permutation, type)]
+  
+  # True hit counts
+  true_plot <- fdr_dt[, .(cutoff, value = true_hits, permutation, type = "True Hits")]
+  
+  # Permuted hit counts
+  null_plot <- fdr_dt[, .(cutoff, value = null_hits, permutation, type = "Permuted Hits")]
+  
+  # Combine all for plotting
+  plot_df <- rbindlist(list(fdr_plot, true_plot, null_plot))
+  plot_df[, type := factor(type, levels = c("FDR", "True Hits", "Permuted Hits"))]
+  
+  ######### 4. Plot
+  ggplot(plot_df, aes(x = cutoff, y = value, group = permutation)) +
+    geom_line(alpha = 0.4) +
+    scale_x_log10(
+      breaks = cutoffs,
+      labels = format(cutoffs, scientific = FALSE)
+    ) +
+    facet_wrap(~type, scales = "free_y", ncol = 1) +
+    theme_minimal() +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1)
+    ) +
+    labs(
+      title = paste("FDR and Hit Counts Across Permutations -", chromatin_group),
+      x = "p-value cutoff (log10 scale)",
+      y = "Value"
+    )
+  
+  ggsave(
+    plot = p,
+    filename = file.path(OUTPUT_FOLDER_pearson_plot,
+                         paste0(chromatin_group,".FDR and Hit Counts Across Permutations.png")),
+    width = 10,
+    height =10
+  )
+  
   }
 }
 # Calculate true Data -----------------------------------------------------------
