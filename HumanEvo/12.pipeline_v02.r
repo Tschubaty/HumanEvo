@@ -3481,14 +3481,14 @@ if (FALSE) {
           
                
 }
-# Calculate state specific CpG permuation simulations dependent on delta --------------------------------------------------
+# doneCalculate state specific CpG permuation simulations dependent on delta --------------------------------------------------
 if (FALSE) {
-  min_delta <- 0.3
-  max_p <- 0.001
+  min_delta <- 0.5
+  #max_p <- 0.001
   
   load_variable_if_not_exists(
     variable_name = "all_CpG_complete_with_test.45",
-    file_path = file.path("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo","12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
+    file_path = file.path(this.dir,"12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
   )
   
   OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation","min_delta",min_delta,sep = "."))
@@ -3500,16 +3500,14 @@ if (FALSE) {
   dir.create(path = OUTPUT_FOLDER_kw,
              showWarnings = FALSE)
   
-  n_repetitions <- 5
+  n_repetitions <- 10
   for (rep in 1:n_repetitions) {
     # rep <- 1
     
     print(rep)
-    
-    time_string <- format(start_time, "%Y_%m_%d_%H_%M_%S")
-    
     for(chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
       start_time <- Sys.time()
+      time_string <- format(start_time, "%Y_%m_%d_%H_%M_%S")
       print(chromatin_group)
       # chromatin_group <- "TSS"
       df_temp <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$state_group == chromatin_group & 
@@ -3572,7 +3570,7 @@ if (FALSE) {
   OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
   dir.create(path = OUTPUT_FOLDER_pearson_plot,
              showWarnings = FALSE)
-  
+  print(OUTPUT_FOLDER_pearson_plot)
   for(chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
   print(chromatin_group)
   true.pval <- all_CpG_complete_with_test.45$pearson.p_val[
@@ -3797,6 +3795,169 @@ if (FALSE) {
   
   }
 }
+# done q-value additon pearson #####################################
+if(FALSE) {
+  min_delta <- 0.5
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      this.dir,
+      "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds"
+    )
+  )
+  
+  OUTPUT_FOLDER_pearson <- file.path(
+    OUTPUT_FOLDER,
+    paste(
+      "45.pearson",
+      "CpG_permutation",
+      "min_delta",
+      min_delta,
+      sep = "."
+    )
+  )
+  dir.create(path = OUTPUT_FOLDER_pearson, showWarnings = FALSE)
+  
+  all_CpG_complete_with_test.45[, paste0("pearson.q_vals.min_delta_", min_delta)] <- NA
+  
+  for (chromatin_group in levels(all_CpG_complete_with_test.45$state_group)) {
+    start_time <- Sys.time()
+    print(chromatin_group)
+    
+    # Get real p-values in group with delta >= threshold
+    idx_real <- which(
+      all_CpG_complete_with_test.45$state_group == chromatin_group &
+        all_CpG_complete_with_test.45$pearson.delta >= min_delta
+    )
+    real_pvals <- all_CpG_complete_with_test.45$pearson.p_val[idx_real]
+    
+    # Load permutation file
+    sim_age_file_name <- list.files(
+      path = OUTPUT_FOLDER_pearson,
+      pattern = paste0("^", chromatin_group, ".pearson.CpG_permutation."),
+      full.names = TRUE
+    )
+    permutation_age <- readRDS(file = sim_age_file_name[1])
+    perm_pvals <- permutation_age$data$pearson.p_val
+    
+    # Compute empirical FDR-adjusted q-values
+    real_order <- order(real_pvals)
+    sorted_real <- real_pvals[real_order]
+    emp_fdr <- numeric(length(sorted_real))
+    
+    # # Initialize progress bar
+    # pb <- txtProgressBar(min = 0, max = length(sorted_real), style = 3)
+    #
+    # for (i in seq_along(sorted_real)) {
+    #   threshold <- sorted_real[i]
+    #   num_perm <- sum(perm_pvals <= threshold)
+    #   num_real <- i
+    #   emp_fdr[i] <- if (num_real == 0) 0 else num_perm / num_real
+    #
+    #   # Update progress bar
+    #   setTxtProgressBar(pb, i)
+    # }
+    #
+    # close(pb)  # Close the progress bar when done
+    
+    #  pre-sort permuted p-values
+    perm_pvals_sorted <- sort(perm_pvals)  ### CHANGED
+    
+    #  use findInterval to count permuted p-values efficiently
+    num_perm_below <- findInterval(sorted_real, perm_pvals_sorted)  ### CHANGED
+    
+    #  compute number of real p-values ≤ threshold by index
+    num_real_below <- seq_along(sorted_real)  ### CHANGED
+    
+    #vectorized FDR calculation
+    emp_fdr <- ifelse(num_real_below == 0, 0, num_perm_below / num_real_below)  ### CHANGED
+    
+    
+    # Monotonic adjustment
+    emp_qvals_sorted <- rev(cummin(rev(emp_fdr)))
+    emp_qvals <- numeric(length(real_pvals))
+    emp_qvals[real_order] <- emp_qvals_sorted
+    
+    # Insert back into main dataframe
+    all_CpG_complete_with_test.45[idx_real, paste0("pearson.q_vals.min_delta_", min_delta)] <- emp_qvals
+    duration <- difftime(Sys.time(), start_time, units = "secs")
+    print(paste(
+      "Finished",
+      chromatin_group,
+      "in",
+      format(.POSIXct(duration, tz = "GMT"), "%H:%M:%S")
+    ))
+    
+  }
+  saveRDS(
+    object =  all_CpG_complete_with_test.45,
+    file = file.path(
+      this.dir,
+      "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.qval.rds"
+    )
+  )
+  
+  
+  # for (chromatin_group in levels(all_CpG_complete_with_test.45$state_group)){
+  #
+  #
+  #   # # Get real p-values in group with delta >= threshold
+  #   # idx_real <- which(
+  #   #   all_CpG_complete_with_test.45$state_group == chromatin_group &
+  #   #     all_CpG_complete_with_test.45$pearson.delta >= min_delta
+  #   # )
+  #   #
+  #   # saveRDS(object =  all_CpG_complete_with_test.45[idx_real,],
+  #   #         file = file.path(this.dir,"12.pipeline/results/WholeGenome/",paste0(chromatin_group,min_ ,all_CpG_complete_with_test.45.qval.rds"))
+  # }
+}
+
+# diplay examples of pearson correlation ########################################
+if(FALSE){
+  min_delta <- 0.5
+  max_p <- 0.00001
+
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      this.dir,
+      "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.qval.rds"
+    )
+  )
+
+  library(ggplot2)
+  
+  # Create a new plotting column where zeros are replaced by a small value
+  df_plot <- all_CpG_complete_with_test.45
+  df_plot$qval_no_zero <- ifelse(df_plot$pearson.q_vals.min_delta_0.5 == 0, 1e-20, df_plot$pearson.q_vals.min_delta_0.5)
+  
+  ggplot(df_plot, aes(x = qval_no_zero)) +
+    geom_histogram(bins = 100, fill = "steelblue", color = "black", alpha = 0.8) +
+    scale_x_log10() +
+    labs(
+      title = "Histogram of Empirical q-values (log10 scale, zeros replaced)",
+      x = "Empirical q-value (log10)",
+      y = "Count"
+    ) +
+    theme_minimal(base_size = 14)
+  
+  
+  indx <- which(
+    all_CpG_complete_with_test.45$pearson.q_vals.min_delta_0.5 <=  max_p  &
+      all_CpG_complete_with_test.45$pearson.delta >= min_delta
+  )
+  
+  
+  significant_CpGs <- all_CpG_complete_with_test.45[indx,]
+  
+  significant_CpGs <- significant_CpGs[order(significant_CpGs$pearson.p_val),]
+  
+  plot_age_correlation(df_row = significant_CpGs[1,],typisation = real_age_typisation)
+  
+}
+
+
 # Calculate true Data -----------------------------------------------------------
 if (create_true_stat) {
   print("create_true_stat")
