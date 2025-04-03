@@ -4394,18 +4394,15 @@ if(FALSE){
   
 }
 
-# Calculate true Data -----------------------------------------------------------
+# Done Calculate true KW  Data -----------------------------------------------------------
 if (create_true_stat) {
-  print("create_true_stat")
-  # compute sample numbers per CpG position
+ 
   start_time <- Sys.time()
-  df_peak_CpG$score <-
-    parallel_score_sample_number(df_peak_CpG, real_age_typisation)
-  end_time <- Sys.time()
-  print(end_time - start_time)
+  df_peak_CpG <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$name != "NO_CHIP",]
   print(paste("# CpG in H3K27Ac peaks:", nrow(df_peak_CpG)))
+  
   print(paste(
-    "# CpG in H3K27Ac peaks with all 39 samples :",
+    "# CpG in H3K27Ac peaks with all samples :",
     sum(df_peak_CpG$score == nrow(real_age_typisation))
   ))
   print(paste("discard ", 100 * (
@@ -4414,6 +4411,8 @@ if (create_true_stat) {
   # discard CpG with not full data
   df_peak_CpG_complete <-
     df_peak_CpG[nrow(real_age_typisation) == df_peak_CpG$score, ]
+  end_time <- Sys.time()
+  print(end_time - start_time)
   
   # compute real data value kruskall_valis
   start_time <- Sys.time()
@@ -4421,30 +4420,19 @@ if (create_true_stat) {
     parallel_testing_kruskall_valis(df_peak_CpG_complete, real_food_typisation)
   end_time <- Sys.time()
   print(end_time - start_time)
-  
-  # comupute real data value pearson_cor
-  start_time <- Sys.time()
-  df_testing_pearson_cor <-
-    parallel_testing_pearson_cor(df = df_peak_CpG_complete, age.typisation = real_age_typisation)
-  end_time <- Sys.time()
-  print(end_time - start_time)
-  
+
   # save results
   df_peak_CpG_complete_with_test <-
     cbind(df_peak_CpG_complete,
-          df_testing_pearson_cor,
           df_kruskall_valis)
   
-  
-  
-  # df_peak_CpG_complete_with_test <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$name != "NO_CHIP",]
+   # df_peak_CpG_complete_with_test <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$name != "NO_CHIP",]
   
   saveRDS(
     object = df_peak_CpG_complete_with_test,
     file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds")
   )
-  
-  
+
   saveRDS(
     object = list(
       permuation_order = NA ,
@@ -4479,6 +4467,41 @@ if (create_true_stat) {
   df_peak_CpG_complete_with_test <-
     readRDS(file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds"))
 }
+# Explore true KW  Data ###########################
+if(FALSE){
+  
+  df_peak_CpG_complete_with_test_min_delta <- df_peak_CpG_complete_with_test[
+    df_peak_CpG_complete_with_test$pearson.delta > min_delta,]
+  
+  print(paste0(nrow(df_peak_CpG_complete_with_test_min_delta ),
+               " CpG in peak with min_delta ",
+               min_delta))
+  
+  print(paste0(sum(df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5 < max_q ),
+               " CpG in peak with q-value smaller  ",
+               max_q))
+  
+  print(paste0(sum(df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.positive < max_q ,na.rm = TRUE),
+               " CpG in peak with positive directional q-value smaller  ",
+               max_q))
+  
+  
+  print(paste0(sum(df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.negative < max_q ,na.rm = TRUE),
+               " CpG in peak with negtaive directional q-value smaller  ",
+               max_q))
+  
+  
+  
+  df_peak_CpG_complete_with_test_sorted <- df_peak_CpG_complete_with_test[
+    order(df_peak_CpG_complete_with_test$kw.p_val),]
+  
+  plot_food_correlation(df_row = df_peak_CpG_complete_with_test_sorted[1000,] ,
+                        typisation = real_food_typisation)
+  
+  
+  
+}
+
 # check other publications: describe LOCUS ---------------------------------------------------------------
 if (FALSE) {
   
@@ -4810,7 +4833,7 @@ if (FALSE) {
 }
 
 
-# describe Data ---------------------------------------------------------------
+# Done describe Data ---------------------------------------------------------------
 if (describe_Data) {
   p <- ggplot(data = df_peak_CpG_complete_with_test,
               mapping = aes(x = pearson.delta)) +
@@ -4880,7 +4903,7 @@ if (describe_Data) {
     "number of CpG in peaks with data:",
     nrow(df_peak_CpG_complete_with_test)
   ))
-  min_delta = 0.39
+  min_delta = 0.5
   paste(
     "number of CpG in peaks with data with min_delta:",
     sum(df_peak_CpG_complete_with_test$pearson.delta > min_delta)
@@ -4921,7 +4944,7 @@ if (describe_Data) {
   
   
   # Figure S1
-  p <- ggplot(data = plot_meta, mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
+  p <- ggplot(data = meta, mapping = aes(x = sample, y = age_mean_BP, color = Type)) +
     geom_point(size = 3, alpha = 0.6) +  # Enhanced points for better visibility
     geom_errorbar(aes(ymin = age_mean_BP - age_std_BP, ymax = age_mean_BP + age_std_BP),
                   width = 0.1, size = 0.5) +  # Adjusted error bars for clarity
@@ -5059,12 +5082,8 @@ if (describe_Data) {
     ) + xlab("years before present (B.P.)") +
     scale_color_discrete(name = "lifestyle/diet")
   
-  plot_meta <- data.frame(meta)
-  plot_meta$Type <-
-    factor(plot_meta$Type, levels = mean_age_by_type$Type)
-  
   p <-
-    ggplot(data = plot_meta , aes(x = age_mean_BP, y = 0, fill = Type)) +
+    ggplot(data = meta , aes(x = age_mean_BP, y = 0, fill = Type)) +
     geom_point(size = 5,
                shape = 25,
                mapping = aes(y = 0.05))  +
@@ -5118,16 +5137,20 @@ if (describe_Data) {
     width = 12,
     height = 4
   )
-  
+
 }
 #"#F8766D" "#A3A500" "#00BF7D" "#00B0F6" "#E76BF3"
 # Calculate column permutation simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
-  dir.create(path = file.path(OUTPUT_FOLDER, "simulation"),
+  dir.create(path = file.path(OUTPUT_FOLDER_pearson_max_q, "simulation"),
              showWarnings = FALSE)
-  n_repetitions <- 50
+  
+  #df_peak_CpG_complete_with_test_min_delta
+  # best_CpGs
+  
+  n_repetitions <- 100
   for (rep in 1:n_repetitions) {
     # rep <- 1
     start_time <- Sys.time()
@@ -5142,23 +5165,23 @@ if (create_permutations_horizonal_columns) {
     sim_food_typisation <- permutation_food$sim_typisation
     
     permutation_age$data <-
-      parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test, age.typisation = sim_age_typisation)
+      parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test_min_delta, age.typisation = sim_age_typisation)
     
     permutation_food$data <-
-      parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test, food.typisation = sim_food_typisation)
+      parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test_min_delta, food.typisation = sim_food_typisation)
     
     # save age permutation
     sim_age_file_name <-
       paste(
         "pearson",
         "horizontal",
-        paste(permutation_age$permuation_order, collapse = "_"),
+        paste(format(Sys.time(), "%Y_%m_%d_%H_%M_%S"), collapse = "_"),
         "rds",
         sep = "."
       )
     saveRDS(
       object = permutation_age,
-      file = file.path(OUTPUT_FOLDER, "simulation", sim_age_file_name)
+      file = file.path(OUTPUT_FOLDER_pearson_max_q, "simulation", sim_age_file_name)
     )
     
     # save food permutation
@@ -5166,20 +5189,144 @@ if (create_permutations_horizonal_columns) {
       paste(
         "KW",
         "horizontal",
-        paste(permutation_food$permuation_order, collapse = "_"),
+        paste(format(Sys.time(), "%Y_%m_%d_%H_%M_%S"), collapse = "_"),
         "rds",
         sep = "."
       )
     saveRDS(
       object = permutation_food,
-      file = file.path(OUTPUT_FOLDER, "simulation", sim_food_file_name)
+      file = file.path(OUTPUT_FOLDER_pearson_max_q, "simulation", sim_food_file_name)
     )
     
     end_time <- Sys.time()
     print(end_time - start_time)
   }
 }
-
+if(FALSE){
+  # --- Load libraries
+  library(parallel)
+  library(pbapply)
+  
+  # --- Parameters
+  total_permutations <- 1e6
+  chunk_size <- 1e5
+  n_chunks <- total_permutations / chunk_size
+  n_cores <- detectCores() - 1
+  set.seed(42)
+  
+  # --- Prepare input
+  meth_matrix <- best_CpGs[, as.character(meta$sample), drop = FALSE]
+  age_original <- meta$age_mean_BP[match(colnames(meth_matrix), meta$sample)]
+  
+  # --- Loop over chunks
+  for (chunk_id in 1:n_chunks) {
+    cat("Running chunk", chunk_id, "of", n_chunks, "\n")
+    
+    # Precompute permuted ages for this chunk
+    age_permutations <- replicate(chunk_size, sample(age_original), simplify = FALSE)
+    
+    # Setup parallel cluster
+    cl <- makeCluster(n_cores)
+    clusterExport(cl, varlist = c("meth_matrix", "age_permutations"), envir = environment())
+    
+    # Run label permutations with progress
+    perm_pval_list <- pbapply::pblapply(seq_len(nrow(meth_matrix)), cl = cl, FUN = function(i) {
+      meth <- as.numeric(meth_matrix[i, ])
+      if (sum(!is.na(meth)) < 3) return(rep(NA, length(age_permutations)))
+      
+      sapply(age_permutations, function(age_perm) {
+        res <- suppressWarnings(cor.test(meth, age_perm, method = "pearson"))
+        res$p.value
+      })
+    })
+    
+    stopCluster(cl)
+    
+    # Convert to data frame
+    perm_pvals_df <- do.call(rbind, perm_pval_list)
+    rownames(perm_pvals_df) <- best_CpGs$name
+    
+    # Save this chunk
+    chunk_file <- file.path(
+      OUTPUT_FOLDER_pearson_max_q,
+      paste0("CpG_label_permutation_chunk_", chunk_id, "_of_", n_chunks, ".rds")
+    )
+    
+    saveRDS(perm_pvals_df, chunk_file)
+    cat("✅ Saved:", chunk_file, "\n\n")
+    
+    # Clean up memory
+    rm(age_permutations, perm_pval_list, perm_pvals_df)
+    gc()
+  }
+  
+  
+  # # --- Input
+  # i <- 1  # Choose CpG row index
+  # real_pval <- best_CpGs$pearson.p_val[i]
+  # null_pvals <- perm_pvals_df[i, ]
+  # 
+  # # --- Plot
+  # library(ggplot2)
+  # 
+  # df_plot <- data.frame(pval = as.numeric(null_pvals))
+  # 
+  # ggplot(df_plot, aes(x = pval)) +
+  #   geom_histogram(binwidth = 0.2, fill = "gray70", color = "black", alpha = 0.7) +
+  #   geom_vline(xintercept = real_pval, color = "red", linetype = "dashed", size = 1) +
+  #   scale_x_log10(
+  #     limits = c(1e-14, 1),
+  #     breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+  #   ) +
+  #   theme_minimal(base_size = 14) +
+  #   labs(
+  #     title = paste("Null Distribution of Permuted p-values (CpG:", best_CpGs$name[i], ")"),
+  #     subtitle = paste("Real p-value =", signif(real_pval, 3)),
+  #     x = "Permuted p-values (log10)",
+  #     y = "Count"
+  #   )
+  
+  # --- Prepare
+  chunk_files <- list.files(
+    path = OUTPUT_FOLDER_pearson_max_q,
+    pattern = "^CpG_label_permutation_chunk_\\d+_of_\\d+\\.rds$",
+    full.names = TRUE
+  )
+  
+  n_chunks <- length(chunk_files)
+  n_CpGs <- nrow(best_CpGs)
+  real_pvals <- best_CpGs$pearson.p_val
+  
+  # --- Initialize counts
+  count_below <- numeric(n_CpGs)
+  total_permuted <- 0
+  
+  # --- Process each chunk
+  for (file in chunk_files) {
+    cat("Processing:", file, "\n")
+    chunk_df <- readRDS(file)
+    
+    stopifnot(nrow(chunk_df) == n_CpGs)  # sanity check
+    total_permuted <- total_permuted + ncol(chunk_df)
+    
+    # Count how many permuted p-values are ≤ real p-value
+    for (i in seq_len(n_CpGs)) {
+      count_below[i] <- count_below[i] + sum(chunk_df[i, ] <= real_pvals[i], na.rm = TRUE)
+    }
+    
+    rm(chunk_df)
+    gc()
+  }
+  
+  # --- Compute empirical p-values
+  empirical_pvals <- (count_below + 1) / (total_permuted + 1)
+  
+  # --- Add to best_CpGs
+  best_CpGs$empirical_p_val <- empirical_pvals
+  
+  
+  
+}
 # Calculate CpG permuation simulations --------------------------------------------------
 if (create_CpG_permutations_vertical) {
   print("create_CpG_permutations_vertical")
@@ -6173,19 +6320,21 @@ if (plot_landscape) {
                      folder_name,
                      "best_CpGs.rds")
   )
+  
+  
+  # chnaged folder t new locatrion
+  # Initialize progress bar
+  pb <- txtProgressBar(min = 0, max = nrow(best_CpGs), style = 3)
   for (r in 1:nrow(best_CpGs)) {
     p <-
       plot_food_correlation(df_row = best_CpGs[r,], typisation = real_food_typisation)
     ggsave(
       plot = p,
-      filename = file.path(
-        OUTPUT_FOLDER,
-        "results",
-        test,
-        folder_name,
+      filename = file.path(OUTPUT_FOLDER_pearson_max_q,
+        "plots",
         paste(best_CpGs$chrom[r],
               best_CpGs$start[r],
-              ".png",
+              "png",
               sep = ".")
       ),
       width = 6,
@@ -6193,25 +6342,23 @@ if (plot_landscape) {
     )
     
     p <-
-      plot_age_correlation(df_row = best_CpGs[r,], typisation = real_age_typisation)
+      plot_age_correlation_type(df_row = best_CpGs[r,], typisation = real_age_typisation)
     ggsave(
       plot = p,
-      filename = file.path(
-        OUTPUT_FOLDER,
-        "results",
-        test,
-        folder_name,
+      filename = file.path(OUTPUT_FOLDER_pearson_max_q,
+                           "plots",
         paste("linear",
               best_CpGs$chrom[r],
               best_CpGs$start[r],
-              ".png",
+              "png",
               sep = ".")
       ),
       width = 6,
       height = 5
     )
-    
+    setTxtProgressBar(pb, r)
   }
+  close(pb)
 }
 # plot pearson landscape --------------------------------------------------
 if (pearson_landscape) {
@@ -6715,37 +6862,23 @@ if (OTHER) {
 }
 # gene annotation --------------------------------------------------------
 if (gene_annotation) {
-  min_delta <- best_values$min_delta
-  minus_log_p <- best_values$minus_log_alpha
-  test <- best_values$test
+  min_delta <- 0.5
+  max_q <- 0.01
   
-  folder_name <- paste("delta",
-                       min_delta,
-                       "minLogP",
-                       minus_log_p,
-                       sep = "_")
+  OUTPUT_FOLDER_pearson_max_q <- file.path(OUTPUT_FOLDER_pearson,paste0("max_q_",max_q))
+  dir.create(OUTPUT_FOLDER_pearson_max_q, showWarnings = FALSE)
   
-  best_CpGs <- readRDS(
-    object = ,
-    file = file.path(OUTPUT_FOLDER,
-                     "results",
-                     test,
-                     folder_name,
-                     "best_CpGs.rds")
-  )
+  best_CpGs <- df_peak_CpG_complete_with_test[
+    df_peak_CpG_complete_with_test$pearson.delta > min_delta &
+      df_peak_CpG_complete_with_test$pearson.q_vals.min_delta_0.5 < max_q ,]
   
   nrow(best_CpGs)
-  
-  
+ 
   bed4 <- best_CpGs[, c("chrom", "start", "end", "name")]
   
   write.table(
     x = bed4,
-    file = file.path(OUTPUT_FOLDER,
-                     "results",
-                     test,
-                     folder_name,
-                     "best_CpGs.bed"),
+    file = file.path(OUTPUT_FOLDER_pearson_max_q,"best_CpGs.bed"),
     sep = "\t",
     quote = FALSE,
     row.names = FALSE,
@@ -6769,14 +6902,9 @@ if (gene_annotation) {
   bed_for_meme$strand <- "."
   
   write.table(
-    x = bed_for_meme[, ],
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
-      paste(
-        "bed_for_meme",
+    x = bed_for_meme[, c("chrom","start","end","name")],
+    file = file.path(OUTPUT_FOLDER_pearson_max_q,
+      paste("bed_for_meme",
         "add_nucleotides",
         add_nucleotides,
         "bed",
@@ -6789,23 +6917,52 @@ if (gene_annotation) {
     col.names = FALSE
   )
   
+  # Split into chunks of max 999 rows
+  chunk_size <- 999
+  num_chunks <- ceiling(nrow(bed4) / chunk_size)
+  
+  for (i in seq_len(num_chunks)) {
+    start_row <- (i - 1) * chunk_size + 1
+    end_row <- min(i * chunk_size, nrow(bed4))
+    
+    bed_chunk <- bed4[start_row:end_row, ]
+    
+    write.table(
+      x = bed_chunk,
+      file = file.path(OUTPUT_FOLDER_pearson_max_q, paste0("best_CpGs_part", i, ".bed")),  # ✅ CHANGED
+      sep = "\t",
+      quote = FALSE,
+      row.names = FALSE,
+      col.names = FALSE
+    )
+  }
+  
+  
   ### make Genhancer query with files https://genome.ucsc.edu/cgi-bin/hgTables
-  # C:\Users\Daniel Batyrev\Documents\GitHub\HumanEvo\HumanEvo\12.pipeline\results\pearson\delta_0.39_minLogP_9.3
+  # https://genome.ucsc.edu/cgi-bin/hgTables?hgsid=2502956011_yAfYHsfwhLRkg8cQImu8jfZaSnG8&clade=mammal&org=Human&db=hg19&hgta_group=regulation&hgta_track=geneHancer&hgta_table=geneHancerInteractionsDoubleElite&hgta_regionType=userRegions&position=chr9%3A1%2C332%2C600-1%2C332%2C609&hgta_outputType=bed&hgta_outFileName=
   # GH Interactio double elite hg19
   
   # Database: hg19    Primary Table: geneHancerInteractionsDoubleElite Data last updated: 2019-01-15
   # Big Bed File Download: /gbdb/hg19/geneHancer/geneHancerInteractionsDoubleElite.v2.hg19.bb
   
-  df_GH <- read.delim(
-    file =  file.path(OUTPUT_FOLDER,
-                      "results",
-                      test,
-                      folder_name,
-                      "hgTables.txt"),
-    header = FALSE,
-    skip = 1,
-    col.names = colnames(best_CpGs)[1:5]
+  # Read all hgTables_part*.BED files into one data frame
+  hg_files <- list.files(
+    path = OUTPUT_FOLDER_pearson_max_q,
+    pattern = "^hgTables_part\\d+\\.BED$",  # Match hgTables_part1.BED, part2.BED, etc.
+    full.names = TRUE
   )
+  
+  df_GH_list <- lapply(hg_files, function(f) {
+    read.delim(
+      file = f,
+      header = FALSE,
+      skip = 1,
+      col.names = colnames(best_CpGs)[1:5]
+    )
+  })
+  
+  df_GH <- do.call(rbind, df_GH_list)
+  
   
   best_CpGs$GeneAnnotation <- NA
   best_CpGs$EnhancerAnnotation <- NA
@@ -6838,11 +6995,7 @@ if (gene_annotation) {
   
   openxlsx::write.xlsx(
     x = best_CpGs,
-    file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
+    file.path(OUTPUT_FOLDER_pearson_max_q,
       "best_CpGs.xlsx"
     ),
     sheetName = "significant_CpGS",
@@ -6852,17 +7005,13 @@ if (gene_annotation) {
   
   write.csv2(
     x = unique(best_CpGs$GeneAnnotation),
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      test,
-      folder_name,
+    file = file.path(OUTPUT_FOLDER_pearson_max_q,
       paste(
         "unique.genes",
         min_delta,
         "delta.GH_Interactions",
-        "p",
-        minus_log_p,
+        "q",
+        max_q,
         "csv",
         sep = "."
       )
@@ -6881,9 +7030,7 @@ if (plot_PCA) {
   } else{
     normalized_string <- ""
   }
-  
-  
-  
+
   meta37 <-
     meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample),]
   
