@@ -5,9 +5,9 @@
 ##
 ##
 ##  output: pipeline
-##
-##
-##  v_01 29.11.2023
+##  # histogramm matched updat: all_CpG.45.samples.histogram.merged2025.hg19.rds
+##  
+##  v_04 10.04.2025
 ##  Author: Daniel Batyrev (HUJI 777634015)
 ##
 # Set up Work Environment --------------------------------------------------
