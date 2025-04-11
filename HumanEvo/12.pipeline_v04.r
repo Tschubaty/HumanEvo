@@ -124,7 +124,7 @@ state_names <-
 ## only big sample groups
 TYPES <- c("Farmer", "Steppe", "HG","Modern")
 
-meta <- as.data.frame(readxl::read_xlsx("AGDP.45.metadata3.xlsx"))
+meta <- as.data.frame(readxl::read_xlsx("AGDP.45.metadata.2.3.xlsx"))
 meta <- meta[order(meta$age_mean_BP), ]
 meta$sample <- factor(x = meta$sample, levels = meta$sample)
 
@@ -159,31 +159,7 @@ OUTPUT_FOLDER <- "12.pipeline"
 dir.create(OUTPUT_FOLDER, showWarnings = FALSE)
 INPUT_FOLDER <- "methylation+chip"
 ANNOTATION <- "hg19"
-CHR_NAMES <-
-  c(
-    "chr1",
-    "chr2",
-    "chr3",
-    "chr4",
-    "chr5",
-    "chr6",
-    "chr7",
-    "chr8",
-    "chr9",
-    "chr10",
-    "chr11",
-    "chr12",
-    "chr13",
-    "chr14",
-    "chr15",
-    "chr16",
-    "chr17",
-    "chr18",
-    "chr19",
-    "chr20",
-    "chr21",
-    "chr22"
-  )
+CHR_NAMES <- paste0("chr",c(1:22))
 pearson_test_colnames <-
   c("pearson.p_val", "pearson.statistic", "pearson.delta")
 KW_test_colnames <- c("kw.p_val", "kw.statistic", "kw.delta")
@@ -219,7 +195,7 @@ plot_landscape <- FALSE
 # load(".RData")
 df_peak_CpG <-
   readRDS(
-    "methylation+chip/H3K27ac.only.45.samples.merged.hg19.rds"
+    "methylation+chip/H3K27ac.only.45.samples.histogram.merged2025.hg19.rds"
   )
 
 # define functions ---------------------------------------------------------
@@ -563,6 +539,57 @@ parallel_testing_pearson_cor <- function(df, age.typisation) {
   return(df_x)
 }
 
+parallel_testing_kruskall_valis_new <- function(df, food.typisation) {
+  clust <- parallel::makeCluster(parallel::detectCores() - 1,type = "PSOCK")
+
+  sample_vec <- as.character(food.typisation$sample)
+  df <- df[, ..sample_vec]         # Subset once, correctly
+  df_meth <- as.matrix(df)         # Fast access in parallel
+  type_vector <- food.typisation$Type
+  
+  # Export needed variables only
+  parallel::clusterExport(clust, varlist = c("df_meth", "type_vector"), envir = environment())
+  
+  print("KW test (optimized)")
+  
+  results_list <- parallel::parLapply(clust, seq_len(nrow(df_meth)), function(i) {
+    row <- df_meth[i, ]
+    valid <- !is.na(row) & !is.na(type_vector)
+    
+    if (length(unique(type_vector[valid])) < 2 || sum(valid) < 5) {
+      return(list(pval = NA_real_, stat = NA_real_, delta = NA_real_))
+    }
+    
+    # Run kruskal.test
+    test_result <- tryCatch({
+      kruskal.test(row[valid] ~ type_vector[valid])
+    }, error = function(e) NA)
+    
+    # Compute delta (max diff in group means)
+    delta_val <- tryCatch({
+      means <- tapply(row[valid], type_vector[valid], mean, na.rm = TRUE)
+      max(means) - min(means)
+    }, error = function(e) NA_real_)
+    
+    if (is.list(test_result)) {
+      list(pval = test_result$p.value, stat = test_result$statistic, delta = delta_val)
+    } else {
+      list(pval = NA_real_, stat = NA_real_, delta = delta_val)
+    }
+  })
+  
+  stopCluster(clust)
+  gc()
+  
+  df_x <- do.call(rbind, lapply(results_list, as.data.frame))
+  colnames(df_x) <- c("kw.p_val", "kw.statistic", "kw.delta")
+  rownames(df_x) <- NULL
+  
+  print("KW complete")
+  return(df_x)
+}
+
+
 
 #' Computes Pearson correlation test on data.frame of methylation
 #' Function is parallelized
@@ -577,8 +604,10 @@ parallel_testing_pearson_cor_new <- function(df, age.typisation) {
   
   # Order samples by age
   sample_order <- order(age.typisation$age_mean_BP)
-  df_meth <- df[, as.character(age.typisation$sample[sample_order])]
+  # Convert to matrix before sending into parallel workers
+  df_meth <- as.matrix(df[, as.character(age.typisation$sample[sample_order]), with = FALSE])
   age <- age.typisation$age_mean_BP[sample_order]
+  
   
   # Export variables
   parallel::clusterExport(clus, varlist = c("df_meth", "age"), envir = environment())
@@ -1138,13 +1167,15 @@ plot_food_correlation <- function(df_row, typisation) {
 }
 
 
-# done H3K27ac Analysis --------------------------------------------------------
+# done25 H3K27ac Analysis --------------------------------------------------------
 if (H3K27ac_Analysis) {
   
   load_variable_if_not_exists(
-    variable_name = "all_CpG.45.samples.merged.hg19",
-    file_path = "methylation+chip/all_CpG.45.samples.merged.hg19.rds"
+    variable_name = "all_CpG.45.samples.hist.hg19",
+    file_path = "methylation+chip/all_CpG.45.samples.histogram.merged2025.hg19.rds"
   )
+  
+  
   
   load_variable_if_not_exists(
     variable_name = "df_state_group",
@@ -1165,7 +1196,7 @@ if (H3K27ac_Analysis) {
   }
   
   all_CpG.meth <-
-    all_CpG.45.samples.merged.hg19[, as.character(meta$sample)]
+    all_CpG.45.samples.hist.hg19[, as.character(meta$sample)]
   
   percent_data <-
     apply(
@@ -1198,7 +1229,7 @@ if (H3K27ac_Analysis) {
     # cut out only coordinates per chromosome
     # n_chr <- 22
     df_chr <-
-      all_CpG.45.samples.merged.hg19[all_CpG.45.samples.merged.hg19$chrom == CHR_NAMES[n_chr], c(1:6)]
+      all_CpG.45.samples.hist.hg19[all_CpG.45.samples.hist.hg19$chrom == CHR_NAMES[n_chr], c(1:6)]
     # load state annotation
     chr_chromatin_seg <-
       readRDS(
@@ -1550,13 +1581,18 @@ if (H3K27ac_Analysis) {
   print("fraction h3K27AC:")
   print(n_CpG_H3K27ac / n_CpG_genome)
 }
-# done Genome wide Analysis --------------------------------------------------------
+# done25 Genome wide Analysis --------------------------------------------------------
 if (Genome_wide_Analysis) {
   # create results folder
   folder_name <- file.path(OUTPUT_FOLDER, "results", "WholeGenome")
   if (!file.exists(folder_name)) {
     dir.create(folder_name, recursive = TRUE)
   }
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG.45.samples.hist.hg19",
+    file_path = "methylation+chip/all_CpG.45.samples.histogram.merged2025.hg19.rds"
+  )
   
   
   for (n_chr in 1:length(CHR_NAMES)) {
@@ -1575,14 +1611,14 @@ if (Genome_wide_Analysis) {
     
     # cut out only coordinates per chromosome
     df_chr <-
-      all_CpG.45.samples.merged.hg19[all_CpG.45.samples.merged.hg19$chrom == CHR_NAMES[n_chr], ]
+      all_CpG.45.samples.hist.hg19[all_CpG.45.samples.hist.hg19$chrom == CHR_NAMES[n_chr], ]
     
-    # compute sample numbers per CpG position
-    start_time <- Sys.time()
-    df_chr$score <-
-      parallel_score_sample_number(df_chr, real_age_typisation)
-    end_time <- Sys.time()
-    print(end_time - start_time)
+    # compute sample numbers per CpG position doen in preprocessing_ancient_files.r
+    # start_time <- Sys.time()
+    # df_chr$score <-
+    #   parallel_score_sample_number(df_chr, real_age_typisation)
+    # end_time <- Sys.time()
+    # print(end_time - start_time)
     print(paste("# CpG in chr:", nrow(df_chr)))
 
     print(paste("# CpG in chr with all samples :",
@@ -1601,14 +1637,14 @@ if (Genome_wide_Analysis) {
     # compute real data value kruskall_valis
     start_time <- Sys.time()
     df_kruskall_valis <-
-      parallel_testing_kruskall_valis(df_chr_complete, real_food_typisation)
+      parallel_testing_kruskall_valis_new(df_chr_complete, real_food_typisation)
     end_time <- Sys.time()
     print(end_time - start_time)
     
     # compute real data value pearson_cor
     start_time <- Sys.time()
     df_testing_pearson_cor <-
-      parallel_testing_pearson_cor(df = df_chr_complete, age.typisation = real_age_typisation)
+      parallel_testing_pearson_cor_new(df = df_chr_complete, age.typisation = real_age_typisation)
     end_time <- Sys.time()
     print(end_time - start_time)
     
@@ -1636,7 +1672,7 @@ if (Genome_wide_Analysis) {
   }
   
 }
-# done compute_all_CpG_complete_with_test.45 -all_CpG_complete_with_test.45 -----------------------------------------------------------------------
+# done25 compute_all_CpG_complete_with_test.45 -all_CpG_complete_with_test.45 -----------------------------------------------------------------------
 if (FALSE) {
   # compine all chr data to big df
   all_CpG_complete_with_test.45 <- data.frame()
@@ -1667,8 +1703,7 @@ if (FALSE) {
     factor(df_universal_annotation$Group[matching_indices],
            levels = correct_state_name(x = unique(df_universal_annotation$Group)))
 
-  
-  all_CpG_complete_with_test.45$pearson.p_val_BH <- p.adjust(all_CpG_complete_with_test.45$pearson.p_val, method = "BH")
+    # all_CpG_complete_with_test.45$pearson.p_val_BH <- p.adjust(all_CpG_complete_with_test.45$pearson.p_val, method = "BH")
   
   saveRDS(
     object = all_CpG_complete_with_test.45,
@@ -1680,7 +1715,7 @@ if (FALSE) {
     )
   )
 }
-# done df_state_sample  -----------------------------------------------------------------------
+# done25 df_state_sample  -----------------------------------------------------------------------
 if (compute_df_state_sample) {
   
   load_variable_if_not_exists(
@@ -1692,6 +1727,8 @@ if (compute_df_state_sample) {
       "all_CpG_complete_with_test.45.rds" 
     )
   )
+  
+  all_CpG_complete_with_test.45 <- as.data.frame(all_CpG_complete_with_test.45)
   
   #df_state_sample <- summary_df <- aggregate(. ~ state, data =  all_CpG_complete_with_test.45[,c("state",as.character(meta$sample))], FUN = mean)
   state_summery_column_names <-
@@ -1781,7 +1818,7 @@ if (compute_df_state_sample) {
     )
   )
 }
-# done df_state_group_sample  -----------------------------------------------------------------------
+# done25 df_state_group_sample  -----------------------------------------------------------------------
 if (compute_df_state_group_sample) {
   
   load_variable_if_not_exists(
@@ -1876,7 +1913,7 @@ if (compute_df_state_group_sample) {
     )
   )
 }
-# done df_state  -----------------------------------------------------------------------
+# done25 df_state  -----------------------------------------------------------------------
 if (compute_df_state) {
   
     load_variable_if_not_exists(
@@ -1999,7 +2036,7 @@ if (compute_df_state) {
     )
   )
 }
-# done df_state_group  -----------------------------------------------------------------------
+# done25 df_state_group  -----------------------------------------------------------------------
 if (compute_df_state_group) {
   
   load_variable_if_not_exists(
@@ -3674,8 +3711,8 @@ if (FALSE) {
       permutation_CpG$permuation_order
     
     permutation_age$data <-
-      parallel_testing_pearson_cor(df = df_permuted, age.typisation = real_age_typisation)
-    print("parallel_testing_pearson_cor complete")
+      parallel_testing_pearson_cor_new(df = df_permuted, age.typisation = real_age_typisation)
+    print("parallel_testing_pearson_cor_new complete")
 
     # save age permutation
     sim_age_file_name <-
@@ -5165,7 +5202,7 @@ if (create_permutations_horizonal_columns) {
     sim_food_typisation <- permutation_food$sim_typisation
     
     permutation_age$data <-
-      parallel_testing_pearson_cor(df = df_peak_CpG_complete_with_test_min_delta, age.typisation = sim_age_typisation)
+      parallel_testing_pearson_cor_new(df = df_peak_CpG_complete_with_test_min_delta, age.typisation = sim_age_typisation)
     
     permutation_food$data <-
       parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test_min_delta, food.typisation = sim_food_typisation)
@@ -5419,7 +5456,7 @@ if (create_CpG_permutations_vertical) {
       permutation_CpG$permuation_order
     
     permutation_age$data <-
-      parallel_testing_pearson_cor(df = df_permuted, age.typisation = real_age_typisation)
+      parallel_testing_pearson_cor_new(df = df_permuted, age.typisation = real_age_typisation)
     permutation_food$data <-
       parallel_testing_kruskall_valis(df = df_permuted, food.typisation = real_food_typisation)
     

@@ -308,7 +308,7 @@ saveRDS(object = final_dt_extended,
 
 saveRDS(object = final_dt_extended[final_dt_extended$name != "NO_CHIP",],
         file = file.path(dirname(this.dir),"methylation+chip","H3K27ac.only.45.samples.histogram.merged2025.hg19.rds"))
-
+}
 # soothin#######################################################
 library(data.table)
 library(zoo)  # For moving average
