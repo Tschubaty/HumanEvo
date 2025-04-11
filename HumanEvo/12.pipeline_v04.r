@@ -605,7 +605,7 @@ parallel_testing_pearson_cor_new <- function(df, age.typisation) {
   # Order samples by age
   sample_order <- order(age.typisation$age_mean_BP)
   # Convert to matrix before sending into parallel workers
-  df_meth <- as.matrix(df[, as.character(age.typisation$sample[sample_order]), with = FALSE])
+  df_meth <- as.matrix(df[, as.character(age.typisation$sample[sample_order])])
   age <- age.typisation$age_mean_BP[sample_order]
   
   
@@ -2122,7 +2122,7 @@ if (compute_df_state_group) {
     )
   )
 }
-# done make_plots  -----------------------------------------------------------------------
+# done25 make_plots  -----------------------------------------------------------------------
 if (compute_make_plots) {
   load_variable_if_not_exists(
     variable_name = "all_CpG_complete_with_test.45",
@@ -2765,7 +2765,7 @@ if (compute_make_plots) {
              
 }
 
-# done state_dependen_analysis --------------------------------------------------------
+# done25 state_dependen_analysis --------------------------------------------------------
 if (state_dependen_analysis) {
   # load data
   load_variable_if_not_exists(
@@ -3647,8 +3647,8 @@ if (FALSE) {
     file_path = file.path(this.dir,"12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
   )
   
-  # drop kw.p_val kw.statistic  kw.delta, pearson.p_val_BH
-  all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45[, !colnames(all_CpG_complete_with_test.45) %in% c("kw.p_val", "kw.statistic", "kw.delta", "pearson.p_val_BH")]
+  # # drop kw.p_val kw.statistic  kw.delta, pearson.p_val_BH
+  # all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45[, !colnames(all_CpG_complete_with_test.45) %in% c("kw.p_val", "kw.statistic", "kw.delta", "pearson.p_val_BH")]
   
   
   OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation","min_delta",min_delta,sep = "."))
