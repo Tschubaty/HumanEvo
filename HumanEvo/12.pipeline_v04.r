@@ -4068,9 +4068,9 @@ if(FALSE) {
     )
   )
   
-  # Suppose your data frame is called df
-  all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45[, !colnames(all_CpG_complete_with_test.45) %in% c("kw.p_val", "kw.statistic", "kw.delta", "pearson.p_val_BH")]
-  
+  # # drop non needed columsn
+  # all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45[, !colnames(all_CpG_complete_with_test.45) %in% c("kw.p_val", "kw.statistic", "kw.delta", "pearson.p_val_BH")]
+  # 
   
   OUTPUT_FOLDER_pearson <- file.path(
     OUTPUT_FOLDER,
