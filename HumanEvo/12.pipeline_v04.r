@@ -55,6 +55,8 @@ library(cowplot)
 library(tidyr)
 library(dplyr)
 library(data.table)
+library(future.apply)
+library(progressr)
 
 # set constants  ----------------------------------------------------------
 
@@ -543,7 +545,13 @@ parallel_testing_kruskall_valis_new <- function(df, food.typisation) {
   clust <- parallel::makeCluster(parallel::detectCores() - 1,type = "PSOCK")
 
   sample_vec <- as.character(food.typisation$sample)
-  df <- df[, ..sample_vec]         # Subset once, correctly
+  # choose data column form data table or data frame 
+  if (data.table::is.data.table(df)) {
+    df <- df[, ..sample_vec]
+  } else {
+    df <- df[, sample_vec, drop = FALSE]
+  }
+  
   df_meth <- as.matrix(df)         # Fast access in parallel
   type_vector <- food.typisation$Type
   
@@ -568,7 +576,7 @@ parallel_testing_kruskall_valis_new <- function(df, food.typisation) {
     # Compute delta (max diff in group means)
     delta_val <- tryCatch({
       means <- tapply(row[valid], type_vector[valid], mean, na.rm = TRUE)
-      max(means) - min(means)
+      max(means,na.rm = TRUE) - min(means,na.rm = TRUE)
     }, error = function(e) NA_real_)
     
     if (is.list(test_result)) {
@@ -588,8 +596,6 @@ parallel_testing_kruskall_valis_new <- function(df, food.typisation) {
   print("KW complete")
   return(df_x)
 }
-
-
 
 #' Computes Pearson correlation test on data.frame of methylation
 #' Function is parallelized
@@ -682,6 +688,27 @@ create_horizontal_permutated_typisation <- function(typisation) {
 }
 # list.files(path =  file.path(OUTPUT_FOLDER, "simulation"))
 
+#' create_horizontal_permutated_typisation creates a random
+#' permutation of the given typisation, keeping Modern samples fixed
+#' @param typisation A data frame with columns $sample and $Type
+#' @returns list with permuted typisation sim_typisation and
+#' numeric vector with permutation order (for ancient only)
+create_horizontal_ancient_permutated_typisation <- function(typisation) {
+  # Split Modern and Non-Modern
+  modern_samples <- typisation[typisation$Type == "Modern", ]
+  ancient_samples <- typisation[typisation$Type != "Modern", ]
+  
+  # Permute only the ancient samples
+  permuation_order <- sample(nrow(ancient_samples))
+  permuted_ancient <- ancient_samples
+  permuted_ancient$sample <- as.character(ancient_samples$sample[permuation_order])
+  
+  # Combine with Modern, preserving original order
+  sim_typisation <- rbind(modern_samples, permuted_ancient)
+  #sim_typisation <- sim_typisation[match(typisation$sample, sim_typisation$sample), ]
+  
+  return(list(sim_typisation = sim_typisation, permuation_order = permuation_order))
+}
 
 
 #' counts number of significant values
@@ -1165,6 +1192,137 @@ plot_food_correlation <- function(df_row, typisation) {
     )
   return(p)
 }
+
+
+# helper 
+# `%||%` <- function(a, b)
+#   if (!is.null(a))
+#     a
+# else
+#   b
+
+
+compute_empirical_qvals_with_saved_permutations <- function(df,
+                                                            typisation,
+                                                            stat_column = "pearson.statistic",
+                                                            n_perm      = 10000,
+                                                            n_threads   = parallel::detectCores() - 1,
+                                                            save_path   = "perm_matrix_10k.rds") {
+  # ---- libraries ----------------------------------------------------
+  library(data.table)
+  library(future.apply)
+  library(progressr)
+  
+  future::plan(multisession, workers = n_threads)
+  handlers("txtprogressbar")
+  
+  # ---- sample split -------------------------------------------------
+  modern_samples  <- as.character(typisation$sample[typisation$Type == "Modern"])
+  ancient_samples <- as.character(typisation$sample[typisation$Type != "Modern"])
+  all_samples     <- c(modern_samples, ancient_samples)
+  
+  age_vec <- setNames(typisation$age_mean_BP, typisation$sample)
+  age_vec <- age_vec[all_samples]
+  
+  # ------------------------------------------------------------------
+  meth_mat <- as.matrix(df[, all_samples])
+  
+  # filter rows that are all‑NA up‑front  ### FIX
+  keep_rows <- rowSums(!is.na(meth_mat)) >= 2
+  df       <- df[keep_rows, ]
+  meth_mat <- meth_mat[keep_rows, , drop = FALSE]
+  
+  # rowwise CpG ID  ---------------------------------------------------
+  CpG_names <- apply(df[, c("chrom", "start", "end")], 1L, function(r) {
+    paste0(r[1], ":", r[2], "-", r[3])
+  })
+  rownames(meth_mat) <- CpG_names
+  
+  message("Running ",
+          n_perm,
+          " permutations on ",
+          nrow(df),
+          " CpGs using ",
+          n_threads,
+          " threads …")
+  
+  # ---- permutation parameters --------------------------------------
+  chunk_size <- max(10L, ceiling(n_perm / n_threads))
+  n_chunks   <- ceiling(n_perm / chunk_size)
+  
+  
+  # ---- generate permutations ---------------------------------------
+  with_progress({
+    p <- progressor(steps = n_chunks)
+    
+    perm_list <- future_lapply(seq_len(n_chunks), function(chunk_id) {
+      p(sprintf("Chunk %d / %d", chunk_id, n_chunks))
+      
+      this_chunk <- min(chunk_size, n_perm - (chunk_id - 1L) * chunk_size)
+      
+      chunk_res <- matrix(NA_real_, nrow = nrow(meth_mat), ncol = this_chunk)
+      
+      for (j in seq_len(this_chunk)) {
+        # 1. permute ancient ages only
+        perm_ages <- age_vec
+        perm_ages[ancient_samples] <- sample(perm_ages[ancient_samples])
+        
+        # 2. fast vectorised correlation (all CpGs at once)
+        chunk_res[, j] <- cor(t(meth_mat),
+                              perm_ages,
+                              method = "pearson",
+                              use    = "pairwise.complete.obs")
+      }
+      chunk_res                                  # nCpG × this_chunk
+    }, future.seed = TRUE)
+  })
+  
+  # bind chunks  ------------------------------------------------------
+  perm_matrix <- do.call(cbind, perm_list)       # nCpG × n_perm  ### FIX (no extra t())
+  rownames(perm_matrix) <- CpG_names
+  
+  saveRDS(perm_matrix, save_path)
+  message("✅ permutation matrix saved to ", save_path)
+  
+  # ---- empirical p‑values ------------------------------------------
+  real_stat <- df[[stat_column]]
+  
+  with_progress({
+    p <- progressor(steps = nrow(perm_matrix))
+    
+    empirical_pvals <- future_apply(perm_matrix, 1L, function(null_vals, i) {
+      p()
+      mean(abs(null_vals) >= abs(real_stat[i]), na.rm = TRUE)
+    }, i = seq_len(nrow(perm_matrix)))
+  })
+  
+  empirical_qvals <- p.adjust(empirical_pvals, method = "BH")
+  
+  # ---- result -------------------------------------------------------
+  data.table(pearson.p_emp = empirical_pvals, pearson.q_emp = empirical_qvals)
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  
+  parallel_testing_pearson_cor_new(df = df_peak_CpG_complete_with_test_min_delta,
+                                   age.typisation = 
+                                    )
+  
+  
+  
+  
+  
+}
+
 
 
 # done25 H3K27ac Analysis --------------------------------------------------------
@@ -3058,12 +3216,31 @@ if (FALSE) {
   counts_sig_min_delta_slope_by_state_group <- counts_sig_min_delta_slope_by_state_group %>%
     left_join(counts_min_delta_by_state_group, by = "state_group", suffix = c("", "_total"))
   
-  counts_sig_min_delta_by_state_group <- significant_genome_CpG_with_delta %>%
-    count(state_group)
-  counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
-    left_join(counts_min_delta_by_state_group,by = "state_group", suffix = c("", "_total"))
+  # counts_sig_min_delta_by_state_group <- significant_genome_CpG_with_delta %>%
+  #   count(state_group)
+  # counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
+  #   left_join(counts_min_delta_by_state_group,by = "state_group", suffix = c("", "_total"))
+  
+  # Ensure full set of state groups is preserved (even those with 0 significant CpGs)
+  counts_sig_min_delta_by_state_group <- counts_min_delta_by_state_group %>%
+    left_join(
+      significant_genome_CpG_with_delta %>% count(state_group),
+      by = "state_group",
+      suffix = c("_total", "")
+    ) %>%
+    mutate(n = ifelse(is.na(n), 0, n))  # Replace NA counts with 0
+  
+  
+  # 1. Remove rows with NA in state_group (optional, only if you want them gone)
+  counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group[!is.na(counts_sig_min_delta_by_state_group$state_group), ]
+  
+  # 2. Drop unused factor levels (including the former <NA>)
+  counts_sig_min_delta_by_state_group$state_group <- droplevels(counts_sig_min_delta_by_state_group$state_group)
+  
   counts_sig_min_delta_by_state_group <- counts_sig_min_delta_by_state_group %>%
     mutate(proportion = n / n_total)
+  
+  
   counts_sig_min_delta_by_state_group$state_color <- unique(df_universal_annotation$color)
   
   
@@ -3078,77 +3255,82 @@ if (FALSE) {
       )
     )
   
-  # # Prepare the data for the Chi-square test
-  # observed <- with(counts_sig_min_delta_by_state_group, data.frame(
-  #   significant = n,
-  #   not_significant = n_total - n
-  # ))
-  # 
-  # # Conduct the Chi-square test
-  # chi_test_result <- chisq.test(observed)
-  # 
-  # # Print the results
-  # print(chi_test_result)
-  # 
-  # 
-  # # goodnwes of fit test
-  # 
-  # # Assuming counts_sig_min_delta_by_state_group is already defined with columns n and n_total
-  # 
-  # # Calculate total observed significant CpGs
-  # total_observed <- sum(counts_sig_min_delta_by_state_group$n)
-  # 
-  # # Total number of CpGs across all groups
-  # total_groups <- sum(counts_sig_min_delta_by_state_group$n_total)
-  # 
-  # # Expected uniform proportion
-  # expected_uniform_proportion <- total_observed / total_groups
-  # 
-  # # Assuming a uniform distribution, calculate expected count for each group
-  # counts_sig_min_delta_by_state_group$expected <- 
-  #   (total_observed / total_groups) * counts_sig_min_delta_by_state_group$n_total
-  # 
-  # # Perform the Chi-square Goodness-of-Fit test for the entire dataset
-  # observed_counts <- counts_sig_min_delta_by_state_group$n
-  # expected_counts <- counts_sig_min_delta_by_state_group$expected
-  # 
-  # # Correcting the usage of chisq.test for goodness-of-fit rather than test of independence
-  # chi_test_result <- chisq.test(x = observed_counts, p = expected_counts / sum(expected_counts), rescale.p = TRUE)
-  # 
-  # # Obtain standardized residuals
-  # counts_sig_min_delta_by_state_group$stdres <- chi_test_result$stdres
-  # 
-  # # Convert standardized residuals to approximate p-values
-  # counts_sig_min_delta_by_state_group$p_value_from_residuals <- 2 * pnorm(abs(counts_sig_min_delta_by_state_group$stdres), lower.tail = FALSE)
-  # 
-  # # Adjusting for multiple testing using Bonferroni correction
-  # counts_sig_min_delta_by_state_group$p_value_adjusted <- p.adjust(counts_sig_min_delta_by_state_group$p_value_from_residuals, method = "bonferroni")
-  # 
-  # # Update significance column to include significance only for positive residuals
-  # counts_sig_min_delta_by_state_group$significance <-
-  #   ifelse(
-  #     counts_sig_min_delta_by_state_group$stdres > 0,
-  #     ifelse(
-  #       counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.001,
-  #       '***',
-  #       ifelse(
-  #         counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.01,
-  #         '**',
-  #         ifelse(
-  #           counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.05,
-  #           '*',
-  #           ''
-  #         )
-  #       )
-  #     ),
-  #     ''
-  #   )
+  # Prepare the data for the Chi-square test
+  observed <- with(counts_sig_min_delta_by_state_group, data.frame(
+    significant = n,
+    not_significant = n_total - n
+  ))
+
+  # Conduct the Chi-square test
+  chi_test_result <- chisq.test(observed)
+
+  # Print the results
+  print(chi_test_result)
+
+
+  # goodnwes of fit test
+
+  # Assuming counts_sig_min_delta_by_state_group is already defined with columns n and n_total
+
+  # Calculate total observed significant CpGs
+  total_observed <- sum(counts_sig_min_delta_by_state_group$n)
+
+  # Total number of CpGs across all groups
+  total_groups <- sum(counts_sig_min_delta_by_state_group$n_total)
+
+  # Expected uniform proportion
+  expected_uniform_proportion <- total_observed / total_groups
+
+  # Assuming a uniform distribution, calculate expected count for each group
+  counts_sig_min_delta_by_state_group$expected <-
+    (total_observed / total_groups) * counts_sig_min_delta_by_state_group$n_total
+
+  # Perform the Chi-square Goodness-of-Fit test for the entire dataset
+  observed_counts <- counts_sig_min_delta_by_state_group$n
+  expected_counts <- counts_sig_min_delta_by_state_group$expected
+
+  # Correcting the usage of chisq.test for goodness-of-fit rather than test of independence
+  chi_test_result <- chisq.test(x = observed_counts, p = expected_counts / sum(expected_counts), rescale.p = TRUE)
+
+  # Obtain standardized residuals
+  counts_sig_min_delta_by_state_group$stdres <- chi_test_result$stdres
+
+  # Convert standardized residuals to approximate p-values
+  counts_sig_min_delta_by_state_group$p_value_from_residuals <- 2 * pnorm(abs(counts_sig_min_delta_by_state_group$stdres), lower.tail = FALSE)
+
+  # Adjusting for multiple testing using Bonferroni correction
+  counts_sig_min_delta_by_state_group$p_value_adjusted <- p.adjust(counts_sig_min_delta_by_state_group$p_value_from_residuals, method = "bonferroni")
+
+  # Update significance column to include significance only for positive residuals
+  counts_sig_min_delta_by_state_group$significance <-
+    ifelse(
+      counts_sig_min_delta_by_state_group$stdres > 0,
+      ifelse(
+        counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.001,
+        '***',
+        ifelse(
+          counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.01,
+          '**',
+          ifelse(
+            counts_sig_min_delta_by_state_group$p_value_adjusted <= 0.05,
+            '*',
+            ''
+          )
+        )
+      ),
+      ''
+    )
   
   counts_sig_min_delta_by_state_group$state_group <-
     factor(counts_sig_min_delta_by_state_group$state_group,
            levels = counts_sig_min_delta_by_state_group$state_group)
+  
+  
+
+  
+  
   #Figure 1c
-  ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
+    ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
     geom_col() + # Use geom_col for pre-calculated values
     #geom_text(aes(label = significance, y = proportion + 0.0005), position = position_dodge(width = 0.9), vjust = -0.5, check_overlap = TRUE) +
     theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotate X labels for readability
@@ -3159,91 +3341,91 @@ if (FALSE) {
     ) +
     scale_fill_manual(values = unique(df_universal_annotation$color))
   
-  
-  # ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
-  #   geom_col() + # Use geom_col for pre-calculated values
-  #   geom_text(aes(label = significance, y = proportion + 0.0005), position = position_dodge(width = 0.9), vjust = -0.5, check_overlap = TRUE) +
-  #   theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotate X labels for readability
-  #   labs(
-  #     x = "",
-  #     y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta > 0.5),
-  #     fill = "State Group"
-  #   ) +
-  #   scale_fill_manual(values = unique(df_universal_annotation$color))
+
+  ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
+    geom_col() + # Use geom_col for pre-calculated values
+    geom_text(aes(label = significance, y = proportion + 0.0005), position = position_dodge(width = 0.9), vjust = -0.5, check_overlap = TRUE) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + # Rotate X labels for readability
+    labs(
+      x = "",
+      y = expression("Proportion of significant CpGs (p <= 0.001)" ~ "from CpGs with" ~ delta > 0.5),
+      fill = "State Group"
+    ) +
+    scale_fill_manual(values = unique(df_universal_annotation$color))
   
 #Figure 1C
   
-  # p <- ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
-  #   geom_col(color = "black", show.legend = FALSE) +  # Use geom_col for pre-calculated values and hide legend
-  #   geom_text(
-  #     aes(label = significance, y = proportion + 0.001),
-  #     position = position_dodge(width = 0.9),
-  #     vjust = -0.5, size = 6,  # Increased size for better visibility
-  #     fontface = "bold",  # Make in-plot text bold
-  #     check_overlap = TRUE
-  #   ) +
-  #   geom_hline(yintercept = expected_uniform_proportion, linetype = "dashed", color = "blue", size = 1) +
-  #   scale_fill_manual(values = unique(df_universal_annotation$color)) +  # Apply your color palette
-  #   labs(
-  #     x = NULL,  # Removing the x-axis label for clarity
-  #     y = expression("Proportion of significant CpGs" ~ (p <= 0.001) ~ "from CpGs with" ~ delta[meth] > 0.5)
-  #   ) +
-  #   theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
-  #   theme(
-  #     axis.text = element_text(face = "bold"),  # Make all axis text bold
-  #     axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Adjusting x-axis labels for readability
-  #     axis.title = element_text(face = "bold"),  # Make axis titles bold
-  #     plot.title = element_text(face = "bold"),  # Make plot title bold
-  #     plot.subtitle = element_text(face = "bold"),  # Make plot subtitle bold
-  #     legend.title = element_text(face = "bold"),  # Make legend title bold
-  #     legend.text = element_text(face = "bold"),  # Make legend text bold
-  #     panel.grid.major = element_blank(),  # Clean background without major grid lines
-  #     panel.grid.minor = element_blank(),  # Clean background without minor grid lines
-  #     legend.position = "none"  # Removing the legend to reduce clutter
-  #   ) # +
-  #   # scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
-  # 
-  # ggsave(
-  #   filename = file.path(
-  #     OUTPUT_FOLDER,
-  #     "results",
-  #     "WholeGenome",
-  #     "plots",
-  #     paste("fraction significant CpG per state group", "png", sep = ".")
-  #   )
-  #   ,
-  #   plot = p,
-  #   width = 10,
-  #   height = 8
-  # )
+  p <- ggplot(data = counts_sig_min_delta_by_state_group, aes(x = state_group, y = proportion, fill = state_group)) +
+    geom_col(color = "black", show.legend = FALSE) +  # Use geom_col for pre-calculated values and hide legend
+    geom_text(
+      aes(label = significance, y = proportion + 0.001),
+      position = position_dodge(width = 0.9),
+      vjust = -0.5, size = 6,  # Increased size for better visibility
+      fontface = "bold",  # Make in-plot text bold
+      check_overlap = TRUE
+    ) +
+    geom_hline(yintercept = expected_uniform_proportion, linetype = "dashed", color = "blue", size = 1) +
+    scale_fill_manual(values = unique(df_universal_annotation$color)) +  # Apply your color palette
+    labs(
+      x = NULL,  # Removing the x-axis label for clarity
+      y = expression("Proportion of significant CpGs" ~ (p <= 0.001) ~ "from CpGs with" ~ delta[meth] > 0.5)
+    ) +
+    theme_minimal(base_size = 14) +  # Use a minimal theme with a larger base font size
+    theme(
+      axis.text = element_text(face = "bold"),  # Make all axis text bold
+      axis.text.x = element_text(angle = 45, hjust = 1, size = 12),  # Adjusting x-axis labels for readability
+      axis.title = element_text(face = "bold"),  # Make axis titles bold
+      plot.title = element_text(face = "bold"),  # Make plot title bold
+      plot.subtitle = element_text(face = "bold"),  # Make plot subtitle bold
+      legend.title = element_text(face = "bold"),  # Make legend title bold
+      legend.text = element_text(face = "bold"),  # Make legend text bold
+      panel.grid.major = element_blank(),  # Clean background without major grid lines
+      panel.grid.minor = element_blank(),  # Clean background without minor grid lines
+      legend.position = "none"  # Removing the legend to reduce clutter
+    ) # +
+  scale_x_discrete(labels = function(x) ifelse(x == "quescient", "quiescent", ifelse(x == "HET", "heterochromatin", x)))
+
+  ggsave(
+    filename = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      "plots",
+      paste("fraction significant CpG per state group", "png", sep = ".")
+    )
+    ,
+    plot = p,
+    width = 10,
+    height = 8
+  )
   
   
   ## reviewer control figure : major comment
   
   # # Compute mean and variance of methylation for each sample
-  # df_methylation_stats <- all_CpG_complete_with_test.45 %>%
-  #   select(all_of(as.character(meta$sample))) %>%
-  #   summarise(across(everything(), list(Mean_Methylation = ~mean(.x, na.rm = TRUE), 
-  #                                       Variance_Methylation = ~var(.x, na.rm = TRUE)))) %>%
-  #   pivot_longer(cols = everything(), names_to = c("sample", ".value"), names_sep = "_")
-  # 
-  # # Merge with metadata
-  # df_meta_methylation <- merge(meta, df_methylation_stats, by = "sample")
+  df_methylation_stats <- all_CpG_complete_with_test.45 %>%
+    select(all_of(as.character(meta$sample))) %>%
+    summarise(across(everything(), list(Mean_Methylation = ~mean(.x, na.rm = TRUE),
+                                        Variance_Methylation = ~var(.x, na.rm = TRUE)))) %>%
+    pivot_longer(cols = everything(), names_to = c("sample", ".value"), names_sep = "_")
+
+  # Merge with metadata
+  df_meta_methylation <- merge(meta, df_methylation_stats, by = "sample")
   # 
   # # Scatter plot for mean methylation with variance as error bars
-  # ggplot(df_meta_methylation, aes(x = age_mean_BP, y = Mean,color = df_meta_methylation$Type )) +
-  #   geom_point(size = 3) +  # Mean methylation points
-  #   geom_errorbar(aes(ymin = Mean - sqrt(Variance), 
-  #                     ymax = Mean + sqrt(Variance)), 
-  #                 width = 0, color = "gray50") +  # Error bars
-  #   scale_x_reverse() +  # Reverse time axis so older samples are on the left
-  #   theme_minimal() +
-  #   labs(
-  #     x = "Age (Years BP)",
-  #     y = "Mean Methylation Level",
-  #     title = "Mean Methylation Over Time with Variability",
-  #     caption = "Error bars represent sqrt(variance) as a measure of spread"
-  #   )
+  ggplot(df_meta_methylation, aes(x = age_mean_BP, y = Mean,color = df_meta_methylation$Type )) +
+    geom_point(size = 3) +  # Mean methylation points
+    geom_errorbar(aes(ymin = Mean - sqrt(Variance),
+                      ymax = Mean + sqrt(Variance)),
+                  width = 0, color = "gray50") +  # Error bars
+    scale_x_reverse() +  # Reverse time axis so older samples are on the left
+    theme_minimal() +
+    labs(
+      x = "Age (Years BP)",
+      y = "Mean Methylation Level",
+      title = "Mean Methylation Over Time with Variability",
+      caption = "Error bars represent sqrt(variance) as a measure of spread"
+    )
   
   
   # # Load required libraries
@@ -3636,10 +3818,10 @@ if (FALSE) {
           
                
 }
-# done Calculate state specific CpG permuation simulations dependent on delta --------------------------------------------------
+# done25 Calculate state specific CpG permuation simulations dependent on delta --------------------------------------------------
 if (FALSE) {
   min_delta <- 0.5
-  #max_p <- 0.001
+  #max_q <- 0.001
 
   
   load_variable_if_not_exists(
@@ -4056,7 +4238,7 @@ if (FALSE) {
   
   }
 }
-# done q-value additon pearson #####################################
+# done25 q-value additon pearson #####################################
 if(FALSE) {
   min_delta <- 0.5
   
@@ -4067,6 +4249,8 @@ if(FALSE) {
       "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds"
     )
   )
+  
+  all_CpG_complete_with_test.45 <- as.data.frame(all_CpG_complete_with_test.45)
   
   # # drop non needed columsn
   # all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45[, !colnames(all_CpG_complete_with_test.45) %in% c("kw.p_val", "kw.statistic", "kw.delta", "pearson.p_val_BH")]
@@ -4084,7 +4268,7 @@ if(FALSE) {
   )
   dir.create(path = OUTPUT_FOLDER_pearson, showWarnings = FALSE)
   
-  all_CpG_complete_with_test.45[, paste0("pearson.q_vals.min_delta_", min_delta)] <- NA
+  all_CpG_complete_with_test.45[, paste0("pearson.q_vals.min_delta_", min_delta)] <- NA_real_
   n_permutations <- c()
   
   for (chromatin_group in levels(all_CpG_complete_with_test.45$state_group)) {
@@ -4157,10 +4341,34 @@ if(FALSE) {
     )
   )
 
+  all_CpG_complete_with_test.45 <- readRDS(file = file.path(
+    this.dir,
+    "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.qval.rds"
+  ))
+  
+  # all_CpG_complete_with_test.45.qval[all_CpG_complete_with_test.45.qval$pearson.delta > min_delta,] 
+  # 
+  # 
+  # # Plot
+  # p <- ggplot(df_plot, aes(x = pearson.p_val, fill = direction)) +
+  #   geom_histogram(bins = 100, position = "identity", alpha = 0.5) +
+  #   scale_x_log10() +
+  #   facet_wrap(~ state_group, scales = "free_y") +
+  #   geom_vline(xintercept = max_q, linetype = "dashed", color = "black") +  # <- added line
+  #   labs(
+  #     title = paste("Histogram of p-values (log scale) by State Group — Δmeth >=", min_delta),
+  #     x = "Pearson p-value (log scale)",
+  #     y = "Count",
+  #     fill = "Direction"
+  #   ) +
+  #   theme_minimal(base_size = 13) +
+  #   theme(strip.text = element_text(size = 10))
+  
 }
 
-# directional q-value additon pearson #####################################
+# done25 directional q-value additon pearson #####################################
 if(FALSE){
+  
   for (chromatin_group in levels(all_CpG_complete_with_test.45$state_group)) {
     # for debuging: chromatin_group <- levels(all_CpG_complete_with_test.45$state_group)[1]
     start_time <- Sys.time()
@@ -4247,9 +4455,10 @@ if(FALSE){
   }  
 # plot direction distributes:
 
+OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
 
 min_delta <- 0.5
-q_thresh <- 0.1
+max_q <- 0.1
 
 # Prepare data
 df_plot <- all_CpG_complete_with_test.45 %>%
@@ -4266,17 +4475,26 @@ df_plot <- all_CpG_complete_with_test.45 %>%
 # Plot
 p <- ggplot(df_plot, aes(x = pearson.p_val, fill = direction)) +
   geom_histogram(bins = 100, position = "identity", alpha = 0.5) +
-  scale_x_log10() +
-  facet_wrap(~ state_group, scales = "free_y") +
-  geom_vline(xintercept = q_thresh, linetype = "dashed", color = "black") +  # <- added line
+  scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x),
+                labels = scales::trans_format("log10", scales::math_format(10^.x))) +  # <- better x-axis labels
+  #facet_wrap(~ state_group, scales = "free_y") +
+  #geom_vline(xintercept = max_q, linetype = "dashed", color = "black") +  # <- added line
   labs(
     title = paste("Histogram of p-values (log scale) by State Group — Δmeth >=", min_delta),
     x = "Pearson p-value (log scale)",
     y = "Count",
     fill = "Direction"
   ) +
-  theme_minimal(base_size = 13) +
-  theme(strip.text = element_text(size = 10))
+  facet_wrap(~ state_group, scales = "free_y", ncol = 4) +  # <- limit columns for cleaner layout
+  theme_minimal(base_size = 14) +  # <- slightly larger font
+  theme(
+    strip.text = element_text(size = 12, face = "bold"),  # <- better emphasis on facets
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 13),
+    legend.position = "top",  # <- move legend to top for visibility
+    legend.title = element_blank(),  # <- cleaner legend
+    panel.grid.minor = element_blank()
+  )
 
 ggsave(plot = p,filename = file.path(OUTPUT_FOLDER_pearson_plot,"q_value Destribtuion by state.png"),width = 16,height = 16)
 
@@ -4289,8 +4507,8 @@ plot_data <- all_CpG_complete_with_test.45 %>%
       pearson.statistic < 0 ~ "Negative",
       TRUE ~ NA_character_
     ),
-    is_significant_pos = get(paste0("pearson.q_vals.min_delta_", min_delta, ".positive")) < q_thresh,
-    is_significant_neg = get(paste0("pearson.q_vals.min_delta_", min_delta, ".negative")) < q_thresh
+    is_significant_pos = get(paste0("pearson.q_vals.min_delta_", min_delta, ".positive")) < max_q,
+    is_significant_neg = get(paste0("pearson.q_vals.min_delta_", min_delta, ".negative")) < max_q
   ) %>%
   filter(!is.na(direction)) %>%
   group_by(state_group, direction) %>%
@@ -4310,13 +4528,30 @@ plot_data <- all_CpG_complete_with_test.45 %>%
 ggplot(plot_data, aes(x = state_group, y = frac_significant, fill = direction)) +
   geom_bar(stat = "identity", position = position_dodge(width = 0.8)) +
   labs(
-    title = paste("Fraction of Significant CpGs (q <", q_thresh, ", delta >=", min_delta, ")"),
+    title = paste("Fraction of Significant CpGs (q <", max_q, ", delta >=", min_delta, ")"),
     x = "Chromatin State Group",
     y = "Fraction Significant",
     fill = "Correlation Direction"
   ) +
   theme_minimal(base_size = 14) +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+saveRDS(object =  all_CpG_complete_with_test.45, file = file.path(
+  this.dir,
+  paste0(
+    "12.pipeline/45.pearson.CpG_permutation.min_delta.",
+    min_delta,
+    "/all_CpG_complete_with_test.45.qval.directional.rds"
+  )
+))
+
+# file_path = file.path(
+#   this.dir,
+#   "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.qval.rds"
+# )
+
 }
 
 # diplay examples of pearson correlation ########################################
@@ -4431,9 +4666,9 @@ if(FALSE){
   
 }
 
-# Done Calculate true KW  Data -----------------------------------------------------------
+# done25 Calculate true KW  Data -----------------------------------------------------------
 if (create_true_stat) {
- 
+  
   start_time <- Sys.time()
   df_peak_CpG <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$name != "NO_CHIP",]
   print(paste("# CpG in H3K27Ac peaks:", nrow(df_peak_CpG)))
@@ -4442,6 +4677,8 @@ if (create_true_stat) {
     "# CpG in H3K27Ac peaks with all samples :",
     sum(df_peak_CpG$score == nrow(real_age_typisation))
   ))
+  
+  
   print(paste("discard ", 100 * (
     1 - sum(df_peak_CpG$score == nrow(real_age_typisation)) / nrow(df_peak_CpG)
   ), "% of CpG positions"))
@@ -4454,17 +4691,17 @@ if (create_true_stat) {
   # compute real data value kruskall_valis
   start_time <- Sys.time()
   df_kruskall_valis <-
-    parallel_testing_kruskall_valis(df_peak_CpG_complete, real_food_typisation)
+    parallel_testing_kruskall_valis_new(df_peak_CpG_complete, real_food_typisation)
   end_time <- Sys.time()
   print(end_time - start_time)
 
-  # save results
-  df_peak_CpG_complete_with_test <-
-    cbind(df_peak_CpG_complete,
-          df_kruskall_valis)
+  # Overwrite or add columns from df_kruskall_valis into df_peak_CpG_complete
+  df_peak_CpG_complete_with_test <- df_peak_CpG_complete
   
-   # df_peak_CpG_complete_with_test <- all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$name != "NO_CHIP",]
-  
+  for (col in colnames(df_kruskall_valis)) {
+    df_peak_CpG_complete_with_test[[col]] <- df_kruskall_valis[[col]]
+  }
+
   saveRDS(
     object = df_peak_CpG_complete_with_test,
     file = file.path(OUTPUT_FOLDER, "df_peak_CpG_complete_with_test.rds")
@@ -4532,7 +4769,7 @@ if(FALSE){
   df_peak_CpG_complete_with_test_sorted <- df_peak_CpG_complete_with_test[
     order(df_peak_CpG_complete_with_test$kw.p_val),]
   
-  plot_food_correlation(df_row = df_peak_CpG_complete_with_test_sorted[1000,] ,
+  plot_food_correlation(df_row = df_peak_CpG_complete_with_test_sorted[1,] ,
                         typisation = real_food_typisation)
   
   
@@ -5177,16 +5414,622 @@ if (describe_Data) {
 
 }
 #"#F8766D" "#A3A500" "#00BF7D" "#00B0F6" "#E76BF3"
+
+# Calculate column age permutation nnot m,odern on hisotgramm data simulations --------------------------------------------------
+if(FALSE){
+  
+  min_delta <- 0.5
+  
+  OUTPUT_FOLDER_pearson <- file.path(
+    OUTPUT_FOLDER,
+    paste(
+      "45.pearson",
+      "CpG_permutation",
+      "min_delta",
+      min_delta,
+      sep = "."
+    )
+  )
+  
+  
+  # saveRDS(object = df_peak_CpG_complete_with_test_min_delta,file = 
+  #         file.path(OUTPUT_FOLDER_pearson,
+  #                   paste0("df_peak_CpG_complete_with_test_min_delta",".rds")))
+  
+  load_variable_if_not_exists(
+    variable_name =  "df_peak_CpG_complete_with_test_min_delta" ,
+    file_path =  file.path(OUTPUT_FOLDER_pearson, paste0("df_peak_CpG_complete_with_test_min_delta",".rds")))
+  
+  # emp_qvals <- compute_empirical_qvals_with_saved_permutations(
+  #   df = df_peak_CpG_complete_with_test_min_delta,
+  #   typisation = real_age_typisation,
+  #   stat_column = "pearson.statistic",  # Or use "pearson.p_val" if preferred
+  #   n_perm = 1000,
+  #   save_path = file.path(OUTPUT_FOLDER_pearson,"simmulations","perm_matrix_10k.rds")
+  # )
+  # 
+  # # Add to your original df
+  # df_peak_CpG_complete_with_test_min_delta <- cbind(
+  #   df_peak_CpG_complete_with_test_min_delta,
+  #   emp_qvals
+  # )
+  
+  
+  # --------------------------------------------------------------
+  # Empirical p/q for Pearson correlation, ancient ages permuted
+  # --------------------------------------------------------------
+  
+  library(data.table)
+  library(parallel)
+  library(progressr)
+  
+  # ------------- USER INPUT -------------------------------------
+  df           <- df_peak_CpG_complete_with_test_min_delta   # methylation table
+  typisation   <- real_age_typisation                        # sample / age / Type
+  stat_column  <- "pearson.statistic"                        # observed stat
+  n_perm       <- 1000000                                     # permutations wanted
+  n_threads    <- parallel::detectCores() - 1                # leave 1 core free
+  save_permmat <- file.path(OUTPUT_FOLDER_pearson,"sim","signifincat_perm_matrix.rds")                      # file to save null matrix
+  # --------------------------------------------------------------
+  
+  max_q <- 0.05
+  
+  signifincat_negative <- df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.negative < max_q
+  signifincat_negative[is.na(signifincat_negative)] <- FALSE
+  signifincat_positive <- df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.positive < max_q
+  signifincat_positive[is.na(signifincat_positive)] <- FALSE
+  indx_signifincat <- signifincat_negative | signifincat_negative
+  
+  df <- df_peak_CpG_complete_with_test_min_delta[indx_signifincat,]
+  
+  
+  dir.create(path = file.path(OUTPUT_FOLDER_pearson,"sim"),
+             showWarnings = FALSE)
+  
+  # ---------- 1. build cluster once -----------------------------
+  clus <- makeCluster(n_threads, type = "PSOCK")
+  
+  # ---------- 2. static objects sent once -----------------------
+  all_samples  <- as.character(typisation$sample)
+  
+  # methylation matrix (rows = CpGs, cols = samples)
+  df <- df[complete.cases(df[, all_samples]),]
+  meth_mat <- as.matrix(df[, all_samples])
+
+  
+  # row‑names for later reference
+  CpG_names <- apply(df[, c("chrom", "start", "end")], 1L,
+                     \(x) paste0(x[1], ":", x[2], "-", x[3]))
+  
+  rownames(meth_mat) <- CpG_names
+  
+  clusterExport(clus, "meth_mat")
+  
+  corr_vec <- function(age) {
+    cor(t(meth_mat), age, method = "pearson", use = "complete.obs")
+  }
+  clusterExport(clus, varlist = c("meth_mat", "corr_vec"))
+  
+  
+  # ---------- 3. prepare age vector & sample sets ---------------
+  age_vec   <- setNames(typisation$age_mean_BP, typisation$sample)[all_samples]
+  ancient   <- as.character(typisation$sample[typisation$Type != "Modern"])
+  
+  # ---------- 4. permutation loop (parallel) --------------------
+  message("Running ", n_perm, " permutations on ", nrow(meth_mat),
+          " CpGs using ", n_threads, " threads …")
+  
+  
+  perm_stats <- parSapply(
+    cl = clus,
+    X = 1:n_perm,
+    FUN = function(i, age_vec, ancient) {
+      perm_age <- age_vec
+      perm_age[ancient] <- sample(perm_age[ancient])
+      cor(t(meth_mat), perm_age, method = "pearson", use = "complete.obs")
+    },
+    age_vec = age_vec,
+    ancient = ancient
+  )
+  
+
+  
+  
+  # perm_stats is n_CpGs × n_perm
+  rownames(perm_stats) <- CpG_names
+  
+  # 1. Define number of valid observations
+  n_obs <- length(age_vec)
+  
+  # 2. Compute the t-statistics (same shape as perm_stats)
+  perm_tstats <- perm_stats * sqrt((n_obs - 2) / (1 - perm_stats^2))
+  
+  # 3. Compute the corresponding two-tailed p-values
+  perm_pvals <- 2 * pt(abs(perm_tstats), df = n_obs - 2, lower.tail = FALSE)
+  
+  saveRDS(perm_stats, save_permmat)
+  message("Null matrix saved to ", save_permmat)
+  
+  # ---------- 5. empirical p‑values ------------------------------
+  real_tstats <- df[[stat_column]]
+  real_p_val <- df[["pearson.p_val"]]
+
+  
+  # Vector of empirical p-values (length = n_CpGs)
+  empirical_pvals <- vapply(seq_along(real_p_val), function(i) {
+    mean(perm_pvals[i, ] <= real_p_val[i], na.rm = TRUE)
+  }, numeric(1))
+  
+  # # Export required variables
+  # clusterExport(clus, varlist = c("perm_pvals", "real_p_val"), envir = environment())
+  # 
+  # # Parallelized empirical p-values
+  # empirical_pvals <- parSapply(clus, X = seq_along(real_p_val), FUN = function(i) {
+  #   mean(perm_pvals[i, ] <= real_p_val[i], na.rm = TRUE)
+  # })
+  # 
+  
+  empirical_qvals <- p.adjust(empirical_pvals, method = "BH")
+  
+  
+  empirical_df <- data.table(
+    pearson.p_emp = empirical_pvals,
+    pearson.q_emp = empirical_qvals
+  )
+  
+  #df <- cbind(df,empirical_df)
+  
+  # Loop through each column in empirical_df
+  for (col in names(empirical_df)) {
+    df[[col]] <- empirical_df[[col]]  # Overwrite if exists, append if not
+  }
+  
+  
+  saveRDS(df,file = file.path(OUTPUT_FOLDER_pearson,"sim","df_significant.rds"))
+  
+  # ---------- 6. clean up ---------------------------------------
+  stopCluster(clus)
+  gc()
+
+  # ---------- 7. combine with main df if desired ---------------
+  # df_peak_CpG_complete_with_test_min_delta <-
+  #   cbind(df_peak_CpG_complete_with_test_min_delta[keep_rows, ], emp_result)
+  
+  # emp_result now holds nrow(df) × 2 with p & q values
+  
+  
+  
+  
+  library(ggplot2)
+  library(data.table)
+  
+  # Example CpG index
+  i <- 1
+  
+  # Get permutation stats for CpG i (row i)
+  null_vals <- as.numeric(perm_tstats[i, ])
+  
+  # Get the real observed statistic for this CpG
+  real_val <- df$pearson.statistic[i]
+  
+  # Create data.table for plotting
+  dt <- data.table(null_distribution = null_vals)
+  
+  # Plot incoporate name from rowname
+  ggplot(dt, aes(x = null_distribution)) +
+    geom_histogram(bins = 100, fill = "skyblue", color = "black", alpha = 0.7) +
+    geom_vline(xintercept = real_val, color = "red", linetype = "dashed", size = 1) +
+    labs(
+      title = paste("Permutation Null Distribution - CpG", i,row.names(perm_tstats)[i]),
+      subtitle = paste("Red line = real statistic:", round(real_val, 4),"p-val",df$pearson.p_emp[i]),
+      x = "Permuted Pearson correlation statistic",
+      y = "Frequency"
+    ) +
+    theme_minimal()
+  
+  # make side by side 
+  plot_age_correlation_type(df_peak_CpG_complete_with_test_min_delta[i,],typisation = real_age_typisation)
+  
+  
+  library(patchwork)  # for side-by-side plots
+  
+  # Calculate q-value distribution
+  q_thresholds <- seq(0, 1, by = 0.01)
+  qval_distribution <- data.table(
+    max_q = q_thresholds,
+    count = sapply(q_thresholds, function(th) sum(df$pearson.q_emp <= th, na.rm = TRUE))
+  )
+  
+  # Compute discrete derivative
+  qval_distribution[, delta_count := c(NA, diff(count))]
+  qval_distribution[, delta_q := c(NA, diff(max_q))]
+  qval_distribution[, derivative := delta_count / delta_q]
+  
+  # Find the max derivative and corresponding q
+  max_deriv_idx <- which.max(qval_distribution$derivative)
+  vline_q <- qval_distribution$max_q[max_deriv_idx]
+  
+  # Original plot
+  p1 <- ggplot(qval_distribution, aes(x = max_q, y = count)) +
+    geom_line(color = "steelblue", size = 1.2) +
+    geom_point(color = "steelblue", alpha = 0.5) +
+    geom_vline(xintercept = vline_q, linetype = "dashed", color = "darkred") +
+    labs(
+      title = "Number of CpGs with q-value ≤ max_q",
+      x = expression(max_q),
+      y = "Number of CpGs"
+    ) +
+    theme_minimal()
+  
+  # Derivative plot
+  p2 <- ggplot(qval_distribution, aes(x = max_q, y = derivative)) +
+    geom_line(color = "firebrick", size = 1.2) +
+    geom_point(color = "firebrick", alpha = 0.5) +
+    geom_vline(xintercept = vline_q, linetype = "dashed", color = "darkred") +
+    labs(
+      title = "Rate of Change (Derivative)",
+      x = expression(max_q),
+      y = "d(CpG count)/d(q)"
+    ) +
+    theme_minimal()
+  
+  # Combine side by side
+  p1 + p2
+  
+  vline_q <- 0.1
+  
+  # Original plot
+  p1 <- ggplot(qval_distribution, aes(x = max_q, y = count)) +
+    geom_line(color = "steelblue", size = 1.2) +
+    geom_point(color = "steelblue", alpha = 0.5) +
+    geom_vline(xintercept = vline_q, linetype = "dashed", color = "darkred") +
+    labs(
+      title = "Number of CpGs with q-value ≤ max_q",
+      x = expression(max_q),
+      y = "Number of CpGs"
+    ) +
+    theme_minimal()
+  
+  # Derivative plot
+  p2 <- ggplot(qval_distribution, aes(x = max_q, y = derivative)) +
+    geom_line(color = "firebrick", size = 1.2) +
+    geom_point(color = "firebrick", alpha = 0.5) +
+    geom_vline(xintercept = vline_q, linetype = "dashed", color = "darkred") +
+    labs(
+      title = "Rate of Change (Derivative)",
+      x = expression(max_q),
+      y = "d(CpG count)/d(q)"
+    ) +
+    theme_minimal()
+  
+  # Combine side by side
+  p1 + p2
+  
+  # max_q <- vline_q # alos try 0.05, 0.01
+  # 
+  # best_CpG <- df[df$pearson.q_emp <= max_q,]
+  # 
+  # #best_CpG <- best_CpG[order(best_CpG$pearson.p_val,decreasing = TRUE),]
+  # 
+  # # save plots of all signifncat CpGs for all i 
+  # plot_age_correlation_type(as.data.frame(best_CpG[1,]),typisation = real_age_typisation)
+  # 
+  # library(data.table)
+  # library(ggplot2)
+  
+  # ------------------------------------------------------------------
+  # 1.  Choose the FDR cutoff you want to use
+  # ------------------------------------------------------------------
+  max_q <- 0.1         # <- or 0.01, or   vline_q  from your derivative plot
+  
+  # ------------------------------------------------------------------
+  # 2.  Make output sub‑folder inside OUTPUT_FOLDER_pearson
+  # ------------------------------------------------------------------
+  out_dir <- file.path(OUTPUT_FOLDER_pearson,
+                       paste0("significant_q_", format(max_q, scientific = FALSE)))
+  dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
+  
+  # ------------------------------------------------------------------
+  # 3.  Filter CpGs by empirical q‑value
+  # ------------------------------------------------------------------
+  best_CpG <- df[df$pearson.q_emp <= max_q, ]
+  
+  # Save the table for reference
+  fwrite(best_CpG,
+         file = file.path(out_dir,
+                          paste0("best_CpG_q", format(max_q, scientific = FALSE), ".csv")))
+  
+  # ------------------------------------------------------------------
+  # 4.  Generate & save a plot for every significant CpG
+  # ------------------------------------------------------------------
+  Message <- paste("Making", nrow(best_CpG), "plots …")
+  message(Message)
+  
+  for (i in seq_len(nrow(best_CpG))) {
+    # Your existing helper (expects a *one‑row* data.frame)
+    p <- plot_age_correlation_type(as.data.frame(best_CpG[i, ]),
+                                   typisation = real_age_typisation)
+    
+    # File name: CpG_###.png  (or use chrom‑start‑end or CpG ID)
+    fname <- sprintf("CpG_%05d.png", i)
+    ggsave(filename = file.path(out_dir, fname),
+           plot     = p,
+           width    = 6,
+           height   = 4,
+           dpi      = 300)
+  }
+  
+  message("✅ All plots and table saved to: ", out_dir)
+  
+  
+}
+# new Calculate column permutation simulations --------------------------------------------------
+
+if (create_permutations_horizonal_columns) {
+  print("create_permutations_horizonal_columns")
+  
+  min_delta <- 0.5
+  
+  
+  df_peak_CpG_complete_with_test_min_delta <- df_peak_CpG_complete_with_test_min_delta[
+    complete.cases(df_peak_CpG_complete_with_test_min_delta[,as.character(real_age_typisation$sample)]),
+  ]
+  
+  OUTPUT_FOLDER_sim <- file.path(OUTPUT_FOLDER_pearson,"simulation")
+  
+  dir.create(path = OUTPUT_FOLDER_sim,
+             showWarnings = FALSE)
+  
+  n_repetitions <- 100
+  for (rep in 1:n_repetitions) {
+    # rep <- 1
+    start_time <- Sys.time()
+    print(rep)
+    
+    permutation_age  <-
+      create_horizontal_ancient_permutated_typisation(real_age_typisation)
+    permutation_food  <-
+      create_horizontal_ancient_permutated_typisation(real_food_typisation)
+    
+    sim_age_typisation <- permutation_age$sim_typisation
+    sim_food_typisation <- permutation_food$sim_typisation
+    
+    permutation_age$data <-
+      parallel_testing_pearson_cor_new(df = df_peak_CpG_complete_with_test_min_delta, age.typisation = sim_age_typisation)
+    
+    permutation_food$data <-
+      parallel_testing_kruskall_valis(df = df_peak_CpG_complete_with_test_min_delta, food.typisation = sim_food_typisation)
+    
+    # save age permutation
+    sim_age_file_name <-
+      paste(
+        "pearson",
+        "horizontal",
+        paste(format(Sys.time(), "%Y_%m_%d_%H_%M_%S"), collapse = "_"),
+        "rds",
+        sep = "."
+      )
+    saveRDS(
+      object = permutation_age,
+      file = file.path(OUTPUT_FOLDER_sim, sim_age_file_name)
+    )
+    
+    # save food permutation
+    sim_food_file_name <-
+      paste(
+        "KW",
+        "horizontal",
+        paste(format(Sys.time(), "%Y_%m_%d_%H_%M_%S"), collapse = "_"),
+        "rds",
+        sep = "."
+      )
+    saveRDS(
+      object = permutation_food,
+      file = file.path(OUTPUT_FOLDER_sim, sim_food_file_name)
+    )
+    
+    end_time <- Sys.time()
+    print(end_time - start_time)
+  }
+}
+if(FALSE){
+  # --- Load libraries
+  library(parallel)
+  library(pbapply)
+  
+  # --- Parameters
+  total_permutations <- 1e6
+  chunk_size <- 1e5
+  n_chunks <- total_permutations / chunk_size
+  n_cores <- detectCores() - 1
+  set.seed(42)
+  
+  # --- Prepare input
+  meth_matrix <- best_CpGs[, as.character(meta$sample), drop = FALSE]
+  age_original <- meta$age_mean_BP[match(colnames(meth_matrix), meta$sample)]
+  
+  # --- Loop over chunks
+  for (chunk_id in 1:n_chunks) {
+    cat("Running chunk", chunk_id, "of", n_chunks, "\n")
+    
+    # Precompute permuted ages for this chunk
+    age_permutations <- replicate(chunk_size, sample(age_original), simplify = FALSE)
+    
+    # Setup parallel cluster
+    cl <- makeCluster(n_cores)
+    clusterExport(cl, varlist = c("meth_matrix", "age_permutations"), envir = environment())
+    
+    # Run label permutations with progress
+    perm_pval_list <- pbapply::pblapply(seq_len(nrow(meth_matrix)), cl = cl, FUN = function(i) {
+      meth <- as.numeric(meth_matrix[i, ])
+      if (sum(!is.na(meth)) < 3) return(rep(NA, length(age_permutations)))
+      
+      sapply(age_permutations, function(age_perm) {
+        res <- suppressWarnings(cor.test(meth, age_perm, method = "pearson"))
+        res$p.value
+      })
+    })
+    
+    stopCluster(cl)
+    
+    # Convert to data frame
+    perm_pvals_df <- do.call(rbind, perm_pval_list)
+    rownames(perm_pvals_df) <- best_CpGs$name
+    
+    # Save this chunk
+    chunk_file <- file.path(
+      OUTPUT_FOLDER_pearson_max_q,
+      paste0("CpG_label_permutation_chunk_", chunk_id, "_of_", n_chunks, ".rds")
+    )
+    
+    saveRDS(perm_pvals_df, chunk_file)
+    cat("✅ Saved:", chunk_file, "\n\n")
+    
+    # Clean up memory
+    rm(age_permutations, perm_pval_list, perm_pvals_df)
+    gc()
+  }
+  
+  
+  # # --- Input
+  # i <- 1  # Choose CpG row index
+  # real_pval <- best_CpGs$pearson.p_val[i]
+  # null_pvals <- perm_pvals_df[i, ]
+  # 
+  # # --- Plot
+  # library(ggplot2)
+  # 
+  # df_plot <- data.frame(pval = as.numeric(null_pvals))
+  # 
+  # ggplot(df_plot, aes(x = pval)) +
+  #   geom_histogram(binwidth = 0.2, fill = "gray70", color = "black", alpha = 0.7) +
+  #   geom_vline(xintercept = real_pval, color = "red", linetype = "dashed", size = 1) +
+  #   scale_x_log10(
+  #     limits = c(1e-14, 1),
+  #     breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+  #   ) +
+  #   theme_minimal(base_size = 14) +
+  #   labs(
+  #     title = paste("Null Distribution of Permuted p-values (CpG:", best_CpGs$name[i], ")"),
+  #     subtitle = paste("Real p-value =", signif(real_pval, 3)),
+  #     x = "Permuted p-values (log10)",
+  #     y = "Count"
+  #   )
+  
+  # --- Prepare
+  chunk_files <- list.files(
+    path = OUTPUT_FOLDER_pearson_max_q,
+    pattern = "^CpG_label_permutation_chunk_\\d+_of_\\d+\\.rds$",
+    full.names = TRUE
+  )
+  
+  n_chunks <- length(chunk_files)
+  n_CpGs <- nrow(best_CpGs)
+  real_pvals <- best_CpGs$pearson.p_val
+  
+  # --- Initialize counts
+  count_below <- numeric(n_CpGs)
+  total_permuted <- 0
+  
+  # --- Process each chunk
+  for (file in chunk_files) {
+    cat("Processing:", file, "\n")
+    chunk_df <- readRDS(file)
+    
+    stopifnot(nrow(chunk_df) == n_CpGs)  # sanity check
+    total_permuted <- total_permuted + ncol(chunk_df)
+    
+    # Count how many permuted p-values are ≤ real p-value
+    for (i in seq_len(n_CpGs)) {
+      count_below[i] <- count_below[i] + sum(chunk_df[i, ] <= real_pvals[i], na.rm = TRUE)
+    }
+    
+    rm(chunk_df)
+    gc()
+  }
+  
+  # --- Compute empirical p-values
+  empirical_pvals <- (count_below + 1) / (total_permuted + 1)
+  
+  # --- Add to best_CpGs
+  best_CpGs$empirical_p_val <- empirical_pvals
+  
+  # --- Add FDR-corrected q-values for empirical p-values
+  best_CpGs$empirical_q_val <- p.adjust(best_CpGs$empirical_p_val, method = "BH")
+  
+  max_q <- 1e-05
+  
+  ggplot(best_CpGs, aes(x = pearson.p_val, y = empirical_p_val)) +
+    geom_point(alpha = 0.5, size = 1.8, color = "steelblue") +
+    scale_x_log10(
+      limits = c(1e-14, 1),
+      breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+    ) +
+    scale_y_log10(
+      limits = c(1e-14, 1),
+      breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+    ) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "orange") +
+    geom_vline(xintercept = max_q,linetype = "dashed", color = "green")+
+    geom_hline(yintercept = max_q, linetype = "dashed", color = "red")+
+    theme_minimal(base_size = 14) +
+    labs(
+      title = "Empirical p-values vs Pearson p-values",
+      x = "Pearson p-value",
+      y = "Empirical p-value"
+    )
+  
+  
+  ggplot(best_CpGs, aes(x = pearson.p_val, y = empirical_q_val)) +
+    geom_point(alpha = 0.5, size = 1.8, color = "steelblue") +
+    scale_x_log10(
+      limits = c(1e-14, 1),
+      breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+    ) +
+    scale_y_log10(
+      limits = c(1e-14, 1),
+      breaks = c(1e-12, 1e-9, 1e-6, 1e-3, 1)
+    ) +
+    geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "orange") +
+    geom_vline(xintercept = max_q,linetype = "dashed", color = "green")+
+    geom_hline(yintercept = max_q, linetype = "dashed", color = "red")+
+    theme_minimal(base_size = 14) +
+    labs(
+      title = "Empirical q-values vs Pearson p-values",
+      x = "Pearson p-value",
+      y = "Empirical p_val"
+    )
+  
+  
+  best_significant_CpGs <- best_CpGs[best_CpGs$empirical_q_val <max_q,]
+  
+  best_significant_CpGs <- best_significant_CpGs[order(best_significant_CpGs$pearson.p_val),]
+  
+  plot_age_correlation_type(df_row = best_significant_CpGs[1,],typisation = real_age_typisation)
+  
+  plot_age_correlation_type(df_row = best_significant_CpGs[nrow(best_significant_CpGs),],typisation = real_age_typisation)
+  
+  
+}
 # Calculate column permutation simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
   print("create_permutations_horizonal_columns")
+  
+  min_delta <- 0.5
+  max_q <- 0.01
+  
+  OUTPUT_FOLDER_pearson_max_q <- file.path(OUTPUT_FOLDER_pearson,paste0("max_q_",max_q))
+  
   dir.create(path = file.path(OUTPUT_FOLDER_pearson_max_q, "simulation"),
              showWarnings = FALSE)
   
-  #df_peak_CpG_complete_with_test_min_delta
-  # best_CpGs
+  df_peak_CpG_complete_with_test_min_delta_max_q_dir <- 
+    df_peak_CpG_complete_with_test_min_delta[!is.na(df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.positive < 0.05 |
+    df_peak_CpG_complete_with_test_min_delta$pearson.q_vals.min_delta_0.5.negative < 0.05),]
   
+  
+
   n_repetitions <- 100
   for (rep in 1:n_repetitions) {
     # rep <- 1
@@ -7115,13 +7958,19 @@ if (gene_annotation) {
 
 # PCA --------------------------------------------------------
 if (plot_PCA) {
+  
+  min_delta <-  0.5
   normalize_PCA <- FALSE
+  
   if (normalize_PCA) {
     normalized_string <- "normalized"
   } else{
     normalized_string <- ""
   }
 
+  df_peak_CpG_complete_with_test_min_delta <- as.data.frame(all_CpG_complete_with_test.45.qval[all_CpG_complete_with_test.45.qval$name != "NO_CHIP" &
+                                                                                 all_CpG_complete_with_test.45.qval$pearson.delta > min_delta,])
+  
   # meta37 <-
   #   meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample),]
   # 
@@ -7171,7 +8020,7 @@ if (plot_PCA) {
       color = sex
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_1v2 & sex") +
     theme_minimal() +
     xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
@@ -7198,7 +8047,7 @@ if (plot_PCA) {
       color = sex
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_3v4 & sex") +
     theme_minimal() +
     xlab(paste("PC3 : ", round(pca_summery[3] * 100, 1), "%")) +
@@ -7220,7 +8069,7 @@ if (plot_PCA) {
   # locality
   # p_pca <- ggplot(data = df_pca ,aes(x=PC1, y=PC2,label = sample,color = Locality))+
   #   geom_point()+
-  #   ggrepel::geom_text_repel()+
+  #   ggrepel::geom_text_repel(show.legend = FALSE)+
   #   labs(subtitle="PCA_1v2 & locality")
   #
   # ggsave(plot = p_pca,filename = file.path(OUTPUT_FOLDER,"PCA_1v2_vs_locality_N_SAMPLES_37.png"),width=16, height=6)
@@ -7238,7 +8087,7 @@ if (plot_PCA) {
       color = old
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_1v2 & OLD >= 5700Y") +
     theme_minimal() +
     xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
@@ -7254,7 +8103,7 @@ if (plot_PCA) {
       color = Country
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_1v2 & Country") +
     theme_minimal() +
     xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
@@ -7280,7 +8129,7 @@ if (plot_PCA) {
       color = Country
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_3v4 & Country") +
     theme_minimal() +
     xlab(paste("PC3 : ", round(pca_summery[3] * 100, 1), "%")) +
@@ -7310,7 +8159,7 @@ if (plot_PCA) {
              color = age_mean_BP > 5000
            )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_1v2 & age") +
     theme_minimal() +
     xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
@@ -7338,7 +8187,7 @@ if (plot_PCA) {
              color = age_mean_BP > 5000
            )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_3v4 & age") +
     theme_minimal() +
     xlab(paste("PC3 : ", round(pca_summery[3] * 100, 1), "%")) +
@@ -7367,7 +8216,7 @@ if (plot_PCA) {
   #     color = Type
   #   )) +
   #   geom_point() +
-  #   ggrepel::geom_text_repel() +
+  #   ggrepel::geom_text_repel(show.legend = FALSE) +
   #   #labs(subtitle = "PCA_1v2 & Type") +
   #   theme_minimal() +
   #   xlab(paste("PC1 : ", round(pca_summery[1] * 100, 1), "%")) +
@@ -7381,12 +8230,13 @@ if (plot_PCA) {
       label = sample,
       color = Type
     )) +
-    geom_point(size = 3, alpha = 0.8) +  # Larger points with slight transparency
+    geom_point(size = 3, alpha = 0.8,show.legend = TRUE) +  # Larger points with slight transparency
     ggrepel::geom_text_repel(
       size = 3.5,  # Slightly larger text size for better readability
       box.padding = unit(0.35, "lines"),  # Add padding around text
       point.padding = unit(0.5, "lines"),  # Avoid clashing text with points
-      segment.color = 'grey50'  # Use a softer line color for text pointers
+      segment.color = 'grey50',  # Use a softer line color for text pointers,
+      show.legend = FALSE
     ) +
     scale_color_manual(values = setNames(mean_age_by_type$color, mean_age_by_type$Type)) +
     labs(
@@ -7429,7 +8279,7 @@ if (plot_PCA) {
       color = Type
     )) +
     geom_point() +
-    ggrepel::geom_text_repel() +
+    ggrepel::geom_text_repel(show.legend = FALSE) +
     #labs(subtitle = "PCA_3v4 & Type") +
     theme_minimal() +
     xlab(paste("PC3 : ", round(pca_summery[3] * 100, 1), "%")) +
