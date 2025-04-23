@@ -126,7 +126,8 @@ state_names <-
 ## only big sample groups
 TYPES <- c("Farmer", "Steppe", "HG","Modern")
 
-meta <- as.data.frame(readxl::read_xlsx("AGDP.45.metadata.2.3.xlsx"))
+meta <- as.data.frame(readxl::read_xlsx("AGDP.45.metadata3.xlsx"))
+# better AGDP.45.metadata.2.3.xlsx
 meta <- meta[order(meta$age_mean_BP), ]
 meta$sample <- factor(x = meta$sample, levels = meta$sample)
 
@@ -195,10 +196,10 @@ plot_landscape <- FALSE
 
 # load Data ---------------------------------------------------------------
 # load(".RData")
-df_peak_CpG <-
-  readRDS(
-    "methylation+chip/H3K27ac.only.45.samples.histogram.merged2025.hg19.rds"
-  )
+# df_peak_CpG <-
+#   readRDS(
+#     "methylation+chip/H3K27ac.only.45.samples.histogram.merged2025.hg19.rds"
+#   )
 
 # define functions ---------------------------------------------------------
 
@@ -3151,6 +3152,8 @@ if (FALSE) {
   min_delta <- 0.5
   max_q <- 0.01
   
+  #all_CpG_complete_with_test.45 <- all_CpG_complete_with_test.45.qval.directional
+  
   load_variable_if_not_exists(
     variable_name = "all_CpG_complete_with_test.45",
     file_path = file.path(OUTPUT_FOLDER,"results", "WholeGenome", "all_CpG_complete_with_test.45.rds")
@@ -3400,6 +3403,118 @@ if (FALSE) {
   )
   
   
+  # new 1c:
+  library(data.table)
+  library(ggplot2)
+  
+  ## 1 ‑ convert to data.table  
+  #dt <- as.data.table(genome_CpG_with_delta)
+  
+  ## 2 ‑ helper: flag significant CpGs
+  dt[, sig_pos := pearson.q_vals.min_delta_0.5.positive < 0.05 ]
+  dt[, sig_neg := pearson.q_vals.min_delta_0.5.negative < 0.05 ]
+  
+  ## 3 ‑ sample classification
+  modern_samples <- as.character(real_age_typisation$sample[real_age_typisation$Type == "Modern"])
+  ancient_samples <- as.character(real_age_typisation$sample[real_age_typisation$Type != "Modern"])
+  
+  ## 4 ‑ per CpG: average methylation in modern/ancient
+  dt[, mean_modern := rowMeans(.SD, na.rm = TRUE), .SDcols = modern_samples]
+  dt[, mean_ancient := rowMeans(.SD, na.rm = TRUE), .SDcols = ancient_samples]
+  dt[, delta_modern_ancient := mean_modern - mean_ancient]  # modern methylation bias
+  
+  ## 5 ‑ summarise per chromatin‑state group  
+  summary_dt <- dt[ ,
+                    .(
+                      total         = .N,
+                      pos_sig       = sum(sig_pos, na.rm = TRUE),
+                      neg_sig       = sum(sig_neg, na.rm = TRUE),
+                      methyl_bias   = mean(delta_modern_ancient, na.rm = TRUE)
+                    ),
+                    by = state_group
+  ]
+  
+  ## 6 ‑ Add log ratio of directional significance
+  summary_dt[, log_ratio_neg_pos := log((neg_sig + 1e-5) / (pos_sig + 1e-5))]
+  
+  
+  # 4 ‑ Melt to long format
+  plot_dt <- melt(
+    summary_dt,
+    id.vars = c("state_group", "total"),
+    measure.vars = c("pos_sig", "neg_sig"),
+    variable.name = "direction",
+    value.name = "n_sig"
+  )
+  
+  plot_dt[, fraction := n_sig / total ]
+  plot_dt[, direction := factor(direction,
+                                levels = c("pos_sig", "neg_sig"),
+                                labels = c("Positive", "Negative"))]
+  
+  ## 5 ‑ bar plot  ---------------------------------------------------------------
+  ggplot(plot_dt,
+         aes(x = state_group, y = fraction, fill = direction)) +
+    geom_col(position = position_dodge(width = 0.8), width = 0.7) +
+    scale_y_continuous(labels = scales::percent_format(accuracy = 1)) +
+    labs(
+      x = "Chromatin‑state group",
+      y = "Fraction of significant CpGs (q < 0.05)",
+      fill = "Correlation direction"
+    ) +
+    theme_minimal(base_size = 13) +
+    theme(
+      axis.text.x  = element_text(angle = 45, hjust = 1),
+      legend.position = "top"
+    )
+  
+  library(data.table)
+  library(ggplot2)
+  
+  # 1. Sicherstellen, dass plot_dt ein data.table ist
+  plot_dt <- as.data.table(plot_dt)
+  
+  # 2. Entferne Zeilen mit NA in state_group
+  plot_dt <- plot_dt[!is.na(state_group)]
+  
+  # 3. Reshape für Bias
+  bias_dt <- dcast(plot_dt, state_group + total ~ direction, value.var = "fraction")
+  
+  # 4. Rechne log-Bias
+  eps <- 1e-6
+  bias_dt[, direction_bias := log((Negative + eps) / (Positive + eps))]
+  
+  # 5. Setze factor levels nach gewünschter Reihenfolge
+  desired_order <- unique(df_universal_annotation$Group)
+  bias_dt[, state_group := factor(state_group, levels = desired_order)]
+  
+  # 6. Farbe pro State-Group
+  state_colors <- setNames(df_universal_annotation$color, df_universal_annotation$Group)
+  
+  # 7. Plot
+  p <- ggplot(bias_dt, aes(x = state_group, y = direction_bias, fill = state_group)) +
+    geom_col(color = "black") +  # schwarzer Rand
+    geom_hline(yintercept = 0, linetype = "dashed", color = "black") +
+    scale_fill_manual(values = state_colors) +
+    labs(
+      x = "Chromatin state group",
+      y = expression("log(Fraction Negative / Fraction Positive)"),
+      title = "Directional Bias of Significant CpGs by Chromatin State"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      legend.position = "none"
+    )
+  
+  OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
+  # Speichern
+  ggsave(
+    plot = p,
+    filename = file.path(OUTPUT_FOLDER_pearson_plot, "directional_bias_barplot.png"),
+    width = 12,
+    height = 6
+  )
   ## reviewer control figure : major comment
   
   # # Compute mean and variance of methylation for each sample
@@ -3551,6 +3666,8 @@ if (FALSE) {
   
   
   ## end reviewer insert 
+  
+  counts_sig_min_delta_slope <- counts_sig_min_delta_slope[complete.cases(counts_sig_min_delta_slope),]
   
   counts_sig_min_delta_slope$total <-
     rep(x = counts_min_delta$n, each = 2)
@@ -4554,7 +4671,7 @@ saveRDS(object =  all_CpG_complete_with_test.45, file = file.path(
 
 }
 
-# diplay examples of pearson correlation ########################################
+# display examples of pearson correlation ########################################
 if(FALSE){
   min_delta <- 0.5
   max_q <- 0.01
@@ -5533,7 +5650,9 @@ if(FALSE){
   )
   
 
+  perm_stats <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/45.pearson.CpG_permutation.min_delta.0.5/sim/perm_matrix_10000.rds")
   
+  perm_stats <- readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/45.pearson.CpG_permutation.min_delta.0.5/sim/signifincat_perm_matrix.rds")
   
   # perm_stats is n_CpGs × n_perm
   rownames(perm_stats) <- CpG_names
@@ -5585,7 +5704,7 @@ if(FALSE){
   }
   
   
-  saveRDS(df,file = file.path(OUTPUT_FOLDER_pearson,"sim","df_significant.rds"))
+  #saveRDS(df,file = file.path(OUTPUT_FOLDER_pearson,"sim","df_significant.rds"))
   
   # ---------- 6. clean up ---------------------------------------
   stopCluster(clus)
@@ -5745,6 +5864,14 @@ if(FALSE){
   Message <- paste("Making", nrow(best_CpG), "plots …")
   message(Message)
   
+  library(data.table)
+  
+  # Pfad zur Datei
+  file_path <- "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/45.pearson.CpG_permutation.min_delta.0.5/significant_q_0.1/best_CpG_q0.1.csv"
+  
+  # Einlesen mit Spaltennamen
+  best_CpG <- fread(file_path)
+  
   for (i in seq_len(nrow(best_CpG))) {
     # Your existing helper (expects a *one‑row* data.frame)
     p <- plot_age_correlation_type(as.data.frame(best_CpG[i, ]),
@@ -5762,14 +5889,110 @@ if(FALSE){
   message("✅ All plots and table saved to: ", out_dir)
   
   
+  library(patchwork)  # für zusammengesetzte Plots
+  library(ggplot2)
+  
+  # Output-Verzeichnis
+  out_dir <- file.path(OUTPUT_FOLDER_pearson, "plot", "best_CpG_q0.1_combined")
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Liste von Einzelplots
+  all_plots <- lapply(seq_len(nrow(best_CpG)), function(i) {
+    plot_age_correlation_type(as.data.frame(best_CpG[i, ]),
+                              typisation = real_age_typisation) +
+      ggtitle(sprintf("CpG %d: %s:%s-%s", i,
+                      best_CpG$chrom[i],
+                      best_CpG$start[i],
+                      best_CpG$end[i]))
+  })
+  
+  # Kombiniere alle Plots – z.B. 4 Spalten
+  combined_plot <- wrap_plots(all_plots, ncol = 8)
+  
+  # Speichern
+  ggsave(
+    filename = file.path(out_dir, "all_best_CpGs_combined.png"),
+    plot = combined_plot,
+    width = 40,    # je nach Spaltenzahl anpassen
+    height = 20,   # je nach Reihenanzahl anpassen
+    dpi = 300
+  )
+  
+  message("✅ Kombinierter Pld lot gespeichert in: ", out_dir)
+  
+  best_CpGs_old_new_data <- data.frame()
+  
+  for (i in seq_len(nrow(best_CpGs_old))) {
+    # Your existing helper (expects a *one‑row* data.frame)
+    
+    
+    j <- which(all_CpG_complete_with_test.45.qval.directional$chrom == best_CpGs_old$chrom[i] &
+                 all_CpG_complete_with_test.45.qval.directional$start == best_CpGs_old$start[i] )
+    
+    best_CpGs_old_new_data <- rbind(best_CpGs_old_new_data,all_CpG_complete_with_test.45.qval.directional[j,])
+    
+    p <- plot_age_correlation_type(df_row = all_CpG_complete_with_test.45.qval.directional[j,],
+                                   typisation = real_age_typisation)
+    
+    # File name: CpG_###.png  (or use chrom‑start‑end or CpG ID)
+    fname <- sprintf("CpG_%05d.png", j)
+    ggsave(filename = file.path(out_dir, fname),
+           plot     = p,
+           width    = 6,
+           height   = 4,
+           dpi      = 300)
+  }
+  saveRDS(object = best_CpGs_old_new_data,file.path(out_dir,"best_CpGs_old_new_data.rds"))
+  message("✅ All plots and table saved to: ", out_dir)
+  
+  
+  library(patchwork)  # für zusammengesetzte Plots
+  library(ggplot2)
+  
+  # Output-Verzeichnis
+  out_dir <- file.path(OUTPUT_FOLDER_pearson, "plot", "best_CpG_old_q0.1_combined")
+  dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+  
+  # Liste von Einzelplots
+  all_plots <- lapply(seq_len(nrow(best_CpG)), function(i) {
+    plot_age_correlation_type(as.data.frame(best_CpG[i, ]),
+                              typisation = real_age_typisation) +
+      ggtitle(sprintf("CpG %d: %s:%s-%s", i,
+                      best_CpG$chrom[i],
+                      best_CpG$start[i],
+                      best_CpG$end[i]))
+  })
+  
+  # Kombiniere alle Plots – z.B. 4 Spalten
+  combined_plot <- wrap_plots(all_plots, ncol = 8)
+  
+  # Speichern
+  ggsave(
+    filename = file.path(out_dir, "all_best_CpGs_old_combined.png"),
+    plot = combined_plot,
+    width = 40,    # je nach Spaltenzahl anpassen
+    height = 20,   # je nach Reihenanzahl anpassen
+    dpi = 300
+  )
+  
+  message("✅ Kombinierter Plot gespeichert in: ", out_dir)
+  
 }
 # new Calculate column permutation simulations --------------------------------------------------
 
 if (create_permutations_horizonal_columns) {
+
   print("create_permutations_horizonal_columns")
-  
+  load_variable_if_not_exists(
+    variable_name = all_CpG_complete_with_test.45.qval.directional,
+    file_path = "C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/45.pearson.CpG_permutation.min_delta.0.5/all_CpG_complete_with_test.45.qval.directional.rds")
+
   min_delta <- 0.5
   
+  df_peak_CpG_complete_with_test_min_delta <- all_CpG_complete_with_test.45.qval.directional[
+    all_CpG_complete_with_test.45.qval.directional$name != "NO_CHIP" &
+      all_CpG_complete_with_test.45.qval.directional$pearson.delta > min_delta,
+  ]
   
   df_peak_CpG_complete_with_test_min_delta <- df_peak_CpG_complete_with_test_min_delta[
     complete.cases(df_peak_CpG_complete_with_test_min_delta[,as.character(real_age_typisation$sample)]),
@@ -7794,6 +8017,45 @@ if (OTHER) {
   #             mapping = aes(x = min_log_p, y = real_count / count)) + geom_point() + theme_minimal() +
   #   ggtitle(min_delta, "min_delta")
 }
+# check old results 
+#all_CpG_complete_with_test.45.qval.directional[all_CpG_complete_with_test.45.qval.directional$start == 12041092,]
+
+# check K.W values ##################
+
+# Stelle sicher, dass NA-Werte ausgeschlossen sind, bevor p.adjust aufgerufen wird
+df_significant$kw.q_val <- NA_real_  # Initialisieren
+
+# Berechne q-Werte nur für gültige p-Werte
+valid_idx <- which(!is.na(df_significant$kw.p_val))
+df_significant$kw.q_val[valid_idx] <- p.adjust(df_significant$kw.p_val[valid_idx], method = "BH")
+
+# Filtere gültige p-Werte
+df_valid <- df_significant
+  #df[!is.na(df$kw.p_val) & df$kw.p_val > 0, ]
+
+# Datenrahmen für ggplot
+pval_df <- data.frame(kw_p_val = df_valid$kw.p_val)
+
+# Plot erstellen
+p <- ggplot(pval_df, aes(x = kw_p_val)) +
+  geom_histogram(bins = 100, fill = "steelblue", color = "black", alpha = 0.7) +
+  scale_x_log10(
+    breaks = c(1e-10, 1e-7, 1e-4, 1e-2, 1),
+    labels = scales::trans_format("log10", scales::math_format(10^.x))
+  ) +
+  labs(
+    title = "Verteilung der Kruskal-Wallis-p-Werte (log10-Skala)",
+    x = "kw.p_val (log10-Skala)",
+    y = "Anzahl CpGs"
+  ) +
+  theme_minimal(base_size = 14)
+
+# Optional: Speichern
+ggsave(plot = p,
+       filename = file.path(OUTPUT_FOLDER_pearson_plot, "kw_pval_log10_distribution.png"),
+       width = 10, height = 6)
+
+print(p)
 # gene annotation --------------------------------------------------------
 if (gene_annotation) {
   min_delta <- 0.5
@@ -7806,9 +8068,9 @@ if (gene_annotation) {
     df_peak_CpG_complete_with_test$pearson.delta > min_delta &
       df_peak_CpG_complete_with_test$pearson.q_vals.min_delta_0.5 < max_q ,]
   
-  nrow(best_CpGs)
+  nrow(best_CpG)
  
-  bed4 <- best_CpGs[, c("chrom", "start", "end", "name")]
+  bed4 <- best_CpG[, c("chrom", "start", "end", "name")]
   
   write.table(
     x = bed4,
@@ -7826,7 +8088,7 @@ if (gene_annotation) {
   
   for (r in 1:length(unique(bed_for_meme$name))) {
     peak <- bed_for_meme$name[r]
-    temp <- best_CpGs[best_CpGs$name == peak, ]
+    temp <- best_CpG[best_CpG$name == peak, ]
     
     bed_for_meme$start[r] <- min(temp$start) - add_nucleotides
     bed_for_meme$end[r] <- max(temp$start) + add_nucleotides
@@ -7863,7 +8125,7 @@ if (gene_annotation) {
     
     write.table(
       x = bed_chunk,
-      file = file.path(OUTPUT_FOLDER_pearson_max_q, paste0("best_CpGs_part", i, ".bed")),  # ✅ CHANGED
+      file = file.path(OUTPUT_FOLDER_pearson_max_q, paste0("best_CpG_part", i, ".bed")),  # ✅ CHANGED
       sep = "\t",
       quote = FALSE,
       row.names = FALSE,
@@ -7891,46 +8153,46 @@ if (gene_annotation) {
       file = f,
       header = FALSE,
       skip = 1,
-      col.names = colnames(best_CpGs)[1:5]
+      col.names = colnames(best_CpG)[1:5]
     )
   })
   
   df_GH <- do.call(rbind, df_GH_list)
   
   
-  best_CpGs$GeneAnnotation <- NA
-  best_CpGs$EnhancerAnnotation <- NA
+  best_CpG$GeneAnnotation <- NA
+  best_CpG$EnhancerAnnotation <- NA
   
-  for (r in 1:nrow(best_CpGs)) {
+  for (r in 1:nrow(best_CpG)) {
     # r <- 1
     annotated_GH <-
-      df_GH[best_CpGs$chrom[r] == df_GH$chrom &
-              df_GH$start <= best_CpGs$start[r] &
-              best_CpGs$end[r] <= df_GH$end,]
+      df_GH[best_CpG$chrom[r] == df_GH$chrom &
+              df_GH$start <= best_CpG$start[r] &
+              best_CpG$end[r] <= df_GH$end,]
     # if any annotation found
     if (nrow(annotated_GH) > 0) {
       # choose annotation with highest score
       annotation <-
         unlist(strsplit(annotated_GH$name[which.max(annotated_GH$score)], split = "/")) #annotated_GH$name[which.max(annotated_GH$score)]
       # get highest score
-      best_CpGs$score <-
+      best_CpG$score <-
         annotated_GH$score[which.max(annotated_GH$score)]
-      best_CpGs$GeneAnnotation[r] <- annotation[1]
-      best_CpGs$EnhancerAnnotation[r] <- annotation[2]
+      best_CpG$GeneAnnotation[r] <- annotation[1]
+      best_CpG$EnhancerAnnotation[r] <- annotation[2]
     }
   }
   
   print(paste("#of annotated enhancers : ", length(unique(
-    best_CpGs$EnhancerAnnotation
+    best_CpG$EnhancerAnnotation
   ))))
   print(paste("#of annotated genes : ", length(unique(
-    best_CpGs$GeneAnnotation
+    best_CpG$GeneAnnotation
   ))))
   
   openxlsx::write.xlsx(
-    x = best_CpGs,
+    x = best_CpG,
     file.path(OUTPUT_FOLDER_pearson_max_q,
-      "best_CpGs.xlsx"
+      "best_CpG.xlsx"
     ),
     sheetName = "significant_CpGS",
     colNames = TRUE
@@ -7938,7 +8200,7 @@ if (gene_annotation) {
   
   
   write.csv2(
-    x = unique(best_CpGs$GeneAnnotation),
+    x = unique(best_CpG$GeneAnnotation),
     file = file.path(OUTPUT_FOLDER_pearson_max_q,
       paste(
         "unique.genes",
@@ -7954,6 +8216,19 @@ if (gene_annotation) {
     row.names = FALSE,
     col.names = FALSE
   )
+  
+  # Alle einzigartigen Genannotationen (ein Eintrag pro Zeile)
+  annotations <- unique(best_CpG$GeneAnnotation)
+  
+  # Speicherpfad
+  output_file <- file.path(OUTPUT_FOLDER_pearson_max_q, "unique_gene_annotations.txt")
+  
+  # Schreibe in Textdatei
+  writeLines(annotations, con = output_file)
+  
+  message("✅ Genannotationen gespeichert in: ", output_file)
+  
+  #https://maayanlab.cloud/Enrichr/enrich?dataset=be2efdbdbdc6d3cc3d22265c482f97f4
 }
 
 # PCA --------------------------------------------------------
@@ -7968,8 +8243,8 @@ if (plot_PCA) {
     normalized_string <- ""
   }
 
-  df_peak_CpG_complete_with_test_min_delta <- as.data.frame(all_CpG_complete_with_test.45.qval[all_CpG_complete_with_test.45.qval$name != "NO_CHIP" &
-                                                                                 all_CpG_complete_with_test.45.qval$pearson.delta > min_delta,])
+  # df_peak_CpG_complete_with_test_min_delta <- as.data.frame(all_CpG_complete_with_test.45.qval[all_CpG_complete_with_test.45.qval$name != "NO_CHIP" &
+  #                                                                                all_CpG_complete_with_test.45.qval$pearson.delta > min_delta,])
   
   # meta37 <-
   #   meta[as.character(meta$sample) %in% as.character(real_food_typisation$sample),]
@@ -8382,8 +8657,8 @@ if (DO_enrichment_analysis) {
 #
 #
 #
-# df <- data.frame(SIRT1 = as.numeric(best_CpGs[!is.na(best_CpGs$GeneAnnotation) & best_CpGs$GeneAnnotation == "SIRT1",as.character(meta$sample)]),
-#                  FMO5 = as.numeric(best_CpGs[!is.na(best_CpGs$GeneAnnotation) & best_CpGs$GeneAnnotation == "FMO5",as.character(meta$sample)]))
+# df <- data.frame(SIRT1 = as.numeric(best_CpG[!is.na(best_CpG$GeneAnnotation) & best_CpG$GeneAnnotation == "SIRT1",as.character(meta$sample)]),
+#                  FMO5 = as.numeric(best_CpG[!is.na(best_CpG$GeneAnnotation) & best_CpG$GeneAnnotation == "FMO5",as.character(meta$sample)]))
 #
 #
 # # Calculate Pearson correlation
