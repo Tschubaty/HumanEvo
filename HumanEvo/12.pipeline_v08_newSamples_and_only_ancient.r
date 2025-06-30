@@ -4407,34 +4407,65 @@ if(FALSE){
   min_delta <- 0.5
   max_q     <- 0.10
   
-  # Load all permutations up front (faster!)
-  perm_list <- lapply(sim_age_file_name, function(f) readRDS(f)$data)
+  ONLY_ANCIENT <- FALSE
   
-  perm_deltas_all <- unlist(lapply(perm_list, `[[`, "pearson.delta"))
-  
-  perm_pvals_all  <- unlist(lapply(perm_list, `[[`, "pearson.p_val"))
-  perm_stats_all  <- unlist(lapply(perm_list, `[[`, "pearson.statistic"))
-  
-  perm_pvals_all_min_delta <- perm_pvals_all[perm_deltas_all > min_delta] 
-  perm_stats_all_min_delta <- perm_stats_all[perm_deltas_all > min_delta]
-  
-  # Calculate number of permutations before and after filtering
-  n_perm_total <- length(perm_deltas_all)
-  n_perm_kept  <- sum(perm_deltas_all > min_delta)
-  n_perm_discarded <- n_perm_total - n_perm_kept
-  perc_discarded <- round(100 * n_perm_discarded / n_perm_total, 2)
-  perc_kept      <- round(100 * n_perm_kept / n_perm_total, 2)
-  
-  cat("Permutations before delta filtering: ", n_perm_total, "\n")
-  cat("Permutations kept (delta >", min_delta, "): ", n_perm_kept, " (", perc_kept, "%)\n", sep="")
-  cat("Permutations discarded: ", n_perm_discarded, " (", perc_discarded, "%)\n", sep="")
-  
-  # Define conditions in a list for each FDR flavor 
+  if(ONLY_ANCIENT){
+    load_variable_if_not_exists(
+      variable_name = "all_CpG_complete_with_test_chosen",
+      file_path = file.path(this.dir,"12.pipeline/results/WholeGenome/all_CpG_complete_with_test.rds")
+    )
+    OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("pearson","CpG_permutation","min_delta",min_delta,sep = "."))
+    real_age_typisation <- real_age_typisation39
+    
+    
+  }else{
+    load_variable_if_not_exists(
+      variable_name = "all_CpG_complete_with_test_chosen",
+      file_path = file.path(this.dir,"12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
+    )
+    OUTPUT_FOLDER_pearson<- file.path(OUTPUT_FOLDER, paste("45.pearson","CpG_permutation","min_delta",min_delta,sep = "."))
+  }
+  dir.create(path = OUTPUT_FOLDER_pearson, showWarnings = FALSE)
+  OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
 
   # Main loop
   for (chromatin_group in levels(all_CpG_complete_with_test_chosen$state_group)) {
+    # chromatin_group <- levels(all_CpG_complete_with_test_chosen$state_group)[1]
+    
+
     message("Processing state group: ", chromatin_group)
     start_time <- Sys.time()
+    
+    # Load permutation file
+    sim_age_file_name <- list.files(
+      path = OUTPUT_FOLDER_pearson,
+      pattern = paste0("^", chromatin_group, ".pearson.CpG_permutation."),
+      full.names = TRUE
+    )
+    
+    # Load all permutations up front (faster!)
+    perm_list <- lapply(sim_age_file_name, function(f) readRDS(f)$data)
+    
+    perm_deltas_all <- unlist(lapply(perm_list, `[[`, "pearson.delta"))
+    
+    perm_pvals_all  <- unlist(lapply(perm_list, `[[`, "pearson.p_val"))
+    perm_stats_all  <- unlist(lapply(perm_list, `[[`, "pearson.statistic"))
+    
+    perm_pvals_all_min_delta <- perm_pvals_all[perm_deltas_all > min_delta] 
+    perm_stats_all_min_delta <- perm_stats_all[perm_deltas_all > min_delta]
+    
+
+    
+    # Calculate number of permutations before and after filtering
+    n_perm_total <- length(perm_deltas_all)
+    n_perm_kept  <- sum(perm_deltas_all > min_delta)
+    n_perm_discarded <- n_perm_total - n_perm_kept
+    perc_discarded <- round(100 * n_perm_discarded / n_perm_total, 2)
+    perc_kept      <- round(100 * n_perm_kept / n_perm_total, 2)
+    
+    cat("Permutations before delta filtering: ", n_perm_total, "\n")
+    cat("Permutations kept (delta >", min_delta, "): ", n_perm_kept, " (", perc_kept, "%)\n", sep="")
+    cat("Permutations discarded: ", n_perm_discarded, " (", perc_discarded, "%)\n", sep="")
     
     idx_real <- which(
       all_CpG_complete_with_test_chosen$state_group == chromatin_group &
@@ -4448,12 +4479,17 @@ if(FALSE){
       negative       = real_stats < 0,
       nondirectional = rep(TRUE, length(real_stats))
     )
+    
+    #target_CpG_permutations <- 1000000
+    
+    
     perm_null_cond_list <- list(
       positive       = perm_stats_all_min_delta > 0,
       negative       = perm_stats_all_min_delta < 0,
       nondirectional = rep(TRUE, length(perm_stats_all_min_delta))
     )
     
+
     
     for (dir_name in names(direction_list)) {
       # Get mask for this direction
@@ -4472,135 +4508,135 @@ if(FALSE){
         perm_sorted <- sort(perm_pvals_dir)
         emp_pval <- findInterval(real_sorted, perm_sorted) / length(perm_sorted)
         emp_pval <- pmin(emp_pval, 1)
+        
         real_rank <- seq_along(real_sorted)
         emp_fdr <- emp_pval / (real_rank / length(real_sorted))
         emp_fdr <- pmin(emp_fdr, 1)
+        emp_fdr_final <- numeric(length(real_pvals_dir))
+        emp_fdr_final[real_order] <- emp_fdr
+        
         emp_qval_sorted <- rev(cummin(rev(emp_fdr)))
         emp_qval_final <- numeric(length(real_pvals_dir))
         emp_qval_final[real_order] <- emp_qval_sorted
         emp_pval_final <- numeric(length(real_pvals_dir))
         emp_pval_final[real_order] <- emp_pval
         
-        col_qval     <- paste0("pearson.q_vals.min_delta_", min_delta, ".", dir_name)
+        col_emp_fdr <- paste0("pearson.emp_fdr.min_delta_", min_delta, ".", dir_name)
         col_emp_pval <- paste0("pearson.emp_pval.min_delta_", min_delta, ".", dir_name)
-        if (!(col_qval %in% colnames(all_CpG_complete_with_test_chosen)))
-          all_CpG_complete_with_test_chosen[[col_qval]] <- NA
+        col_emp_qval <- paste0("pearson.emp_qval.min_delta_", min_delta, ".", dir_name)
+        
+        # Create columns if missing
+        if (!(col_emp_fdr %in% colnames(all_CpG_complete_with_test_chosen)))
+          all_CpG_complete_with_test_chosen[[col_emp_fdr]] <- NA
         if (!(col_emp_pval %in% colnames(all_CpG_complete_with_test_chosen)))
           all_CpG_complete_with_test_chosen[[col_emp_pval]] <- NA
-        all_CpG_complete_with_test_chosen[idx_real[real_mask], col_qval] <- emp_qval_final
+        if (!(col_emp_qval %in% colnames(all_CpG_complete_with_test_chosen)))
+          all_CpG_complete_with_test_chosen[[col_emp_qval]] <- NA
+        
+        # Assign results
+        all_CpG_complete_with_test_chosen[idx_real[real_mask], col_emp_fdr]  <- emp_fdr_final
         all_CpG_complete_with_test_chosen[idx_real[real_mask], col_emp_pval] <- emp_pval_final
+        all_CpG_complete_with_test_chosen[idx_real[real_mask], col_emp_qval] <- emp_qval_final
+        
       }
     }
     elapsed <- round(difftime(Sys.time(), start_time, units = "mins"), 2)
     message("Finished ", chromatin_group, " in ", elapsed, " min")
   }
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  
-  ########################## new implementation #################################
-  
-  # Main loop: compute empirical FDR and q-values for each chromatin state group
-  for (chromatin_group in levels(all_CpG_complete_with_test_chosen$state_group)) {
-    # for debuging: chromatin_group <- levels(all_CpG_complete_with_test_chosen$state_group)[1]
-    message("Processing state group: ", chromatin_group)
-    start_time <- Sys.time()
-    
-    # Subset indices for this state group and delta filter
-    idx_this_group <- which(
-      all_CpG_complete_with_test_chosen$state_group == chromatin_group &
-        all_CpG_complete_with_test_chosen$pearson.delta >= min_delta
-    )
-    
-    # Get real statistics and p-values for this subset
-    real_stat <- all_CpG_complete_with_test_chosen$pearson.statistic[idx_this_group]
-    real_pval <- all_CpG_complete_with_test_chosen$pearson.p_val[idx_this_group]
-    
-    
-    #  Get direction for each CpG (TRUE=Positive, FALSE=Negative)
-    is_pos <- real_stat > 0
-    is_neg <- real_stat < 0
-    
-    # Load corresponding permuted test statistics (for direction filtering)
-    perm_pvals <- unlist(lapply(sim_age_file_name, function(f) {
-      readRDS(f)$data$pearson.p_val
-    }))
-    
-    # Collect all permuted p-values and stats for the null distribution
-    perm_pval_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$data$pearson.p_val))
-    perm_stat_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$data$pearson.statistic))
-    perm_delta_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$pearson.delta))
-
-    
-    # ---- Positive Direction FDR ----
-    real_pos <- real_pvals[is_pos]
-    perm_pvals_pos <- perm_pvals[perm_stats > 0]
-    
-    if (length(perm_pvals_pos) > 0 && length(real_pos) > 0) {
-      perm_pvals_pos <- sort(perm_pvals_pos)
-      real_order_pos <- order(real_pos)
-      sorted_real_pos <- real_pos[real_order_pos]
-      
-      num_perm_below_pos <- findInterval(sorted_real_pos, perm_pvals_pos)
-      num_perm_below_pos <- pmin(num_perm_below_pos, length(perm_pvals_pos))
-      
-      num_real_below_pos <- seq_along(sorted_real_pos)
-      emp_fdr_pos <- ifelse(num_real_below_pos == 0, 0, num_perm_below_pos / num_real_below_pos)
-      emp_qvals_sorted_pos <- pmin(1, rev(cummin(rev(emp_fdr_pos))))
-      emp_qvals_pos <- numeric(length(real_pos))
-      emp_qvals_pos[real_order_pos] <- emp_qvals_sorted_pos
-      
-      col_pos <- paste0("pearson.q_vals.min_delta_", min_delta, ".positive")
-      if (!(col_pos %in% colnames(all_CpG_complete_with_test_chosen))) {
-        all_CpG_complete_with_test_chosen[[col_pos]] <- NA
-      }
-      all_CpG_complete_with_test_chosen[idx_real[is_pos], col_pos] <- emp_qvals_pos
-    }
-    
-    
-    
-    # ---- Negative Direction FDR ----
-    real_neg <- real_pvals[is_neg]
-    perm_pvals_neg <- perm_pvals[perm_stats < 0]
-    
-    if (length(perm_pvals_neg) > 0 && length(real_neg) > 0) {
-      perm_pvals_neg <- sort(perm_pvals_neg)
-      real_order_neg <- order(real_neg)
-      sorted_real_neg <- real_neg[real_order_neg]
-      
-      num_perm_below_neg <- findInterval(sorted_real_neg, perm_pvals_neg)
-      num_perm_below_neg <- pmin(num_perm_below_neg, length(perm_pvals_neg))  
-      
-      num_real_below_neg <- seq_along(sorted_real_neg)
-      emp_fdr_neg <- ifelse(num_real_below_neg == 0, 0, num_perm_below_neg / num_real_below_neg)
-      emp_qvals_sorted_neg <- pmin(1, rev(cummin(rev(emp_fdr_neg))))
-      emp_qvals_neg <- numeric(length(real_neg))
-      emp_qvals_neg[real_order_neg] <- emp_qvals_sorted_neg
-      
-      col_neg <- paste0("pearson.q_vals.min_delta_", min_delta, ".negative")
-      if (!(col_neg %in% colnames(all_CpG_complete_with_test_chosen))) {
-        all_CpG_complete_with_test_chosen[[col_neg]] <- NA
-      }
-      all_CpG_complete_with_test_chosen[idx_real[is_neg], col_neg] <- emp_qvals_neg
-    }
-    
-  }  
-# plot direction distributes:
-
-OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
-
-min_delta <- 0.5
-max_q <- 0.1
+#
+#old implementation #
+#   
+#   # Main loop: compute empirical FDR and q-values for each chromatin state group
+#   for (chromatin_group in levels(all_CpG_complete_with_test_chosen$state_group)) {
+#     # for debuging: chromatin_group <- levels(all_CpG_complete_with_test_chosen$state_group)[1]
+#     message("Processing state group: ", chromatin_group)
+#     start_time <- Sys.time()
+#     
+#     # Subset indices for this state group and delta filter
+#     idx_this_group <- which(
+#       all_CpG_complete_with_test_chosen$state_group == chromatin_group &
+#         all_CpG_complete_with_test_chosen$pearson.delta >= min_delta
+#     )
+#     
+#     # Get real statistics and p-values for this subset
+#     real_stat <- all_CpG_complete_with_test_chosen$pearson.statistic[idx_this_group]
+#     real_pval <- all_CpG_complete_with_test_chosen$pearson.p_val[idx_this_group]
+#     
+#     
+#     #  Get direction for each CpG (TRUE=Positive, FALSE=Negative)
+#     is_pos <- real_stat > 0
+#     is_neg <- real_stat < 0
+#     
+#     # Load corresponding permuted test statistics (for direction filtering)
+#     perm_pvals <- unlist(lapply(sim_age_file_name, function(f) {
+#       readRDS(f)$data$pearson.p_val
+#     }))
+#     
+#     # Collect all permuted p-values and stats for the null distribution
+#     perm_pval_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$data$pearson.p_val))
+#     perm_stat_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$data$pearson.statistic))
+#     perm_delta_all <- unlist(lapply(sim_age_file_name, function(f) readRDS(f)$pearson.delta))
+# 
+#     
+#     # ---- Positive Direction FDR ----
+#     real_pos <- real_pvals[is_pos]
+#     perm_pvals_pos <- perm_pvals[perm_stats > 0]
+#     
+#     if (length(perm_pvals_pos) > 0 && length(real_pos) > 0) {
+#       perm_pvals_pos <- sort(perm_pvals_pos)
+#       real_order_pos <- order(real_pos)
+#       sorted_real_pos <- real_pos[real_order_pos]
+#       
+#       num_perm_below_pos <- findInterval(sorted_real_pos, perm_pvals_pos)
+#       num_perm_below_pos <- pmin(num_perm_below_pos, length(perm_pvals_pos))
+#       
+#       num_real_below_pos <- seq_along(sorted_real_pos)
+#       emp_fdr_pos <- ifelse(num_real_below_pos == 0, 0, num_perm_below_pos / num_real_below_pos)
+#       emp_qvals_sorted_pos <- pmin(1, rev(cummin(rev(emp_fdr_pos))))
+#       emp_qvals_pos <- numeric(length(real_pos))
+#       emp_qvals_pos[real_order_pos] <- emp_qvals_sorted_pos
+#       
+#       col_pos <- paste0("pearson.q_vals.min_delta_", min_delta, ".positive")
+#       if (!(col_pos %in% colnames(all_CpG_complete_with_test_chosen))) {
+#         all_CpG_complete_with_test_chosen[[col_pos]] <- NA
+#       }
+#       all_CpG_complete_with_test_chosen[idx_real[is_pos], col_pos] <- emp_qvals_pos
+#     }
+#     
+#     
+#     
+#     # ---- Negative Direction FDR ----
+#     real_neg <- real_pvals[is_neg]
+#     perm_pvals_neg <- perm_pvals[perm_stats < 0]
+#     
+#     if (length(perm_pvals_neg) > 0 && length(real_neg) > 0) {
+#       perm_pvals_neg <- sort(perm_pvals_neg)
+#       real_order_neg <- order(real_neg)
+#       sorted_real_neg <- real_neg[real_order_neg]
+#       
+#       num_perm_below_neg <- findInterval(sorted_real_neg, perm_pvals_neg)
+#       num_perm_below_neg <- pmin(num_perm_below_neg, length(perm_pvals_neg))  
+#       
+#       num_real_below_neg <- seq_along(sorted_real_neg)
+#       emp_fdr_neg <- ifelse(num_real_below_neg == 0, 0, num_perm_below_neg / num_real_below_neg)
+#       emp_qvals_sorted_neg <- pmin(1, rev(cummin(rev(emp_fdr_neg))))
+#       emp_qvals_neg <- numeric(length(real_neg))
+#       emp_qvals_neg[real_order_neg] <- emp_qvals_sorted_neg
+#       
+#       col_neg <- paste0("pearson.q_vals.min_delta_", min_delta, ".negative")
+#       if (!(col_neg %in% colnames(all_CpG_complete_with_test_chosen))) {
+#         all_CpG_complete_with_test_chosen[[col_neg]] <- NA
+#       }
+#       all_CpG_complete_with_test_chosen[idx_real[is_neg], col_neg] <- emp_qvals_neg
+#     }
+#     
+#   }  
+# # plot direction distributes:
+# 
+# OUTPUT_FOLDER_pearson_plot <- file.path( OUTPUT_FOLDER_pearson,"plot")
+# 
+# min_delta <- 0.5
+# max_q <- 0.1
 
 # Prepare data
 df_plot <- all_CpG_complete_with_test_chosen %>%
@@ -4746,7 +4782,6 @@ if(FALSE){
     file.path(this.dir,OUTPUT_FOLDER_pearson,"all_CpG_complete_with_test_chosen.qval.directional.rds")
   )
 
-  
   # Create a new plotting column where zeros are replaced by a small value
   df_plot <- all_CpG_complete_with_test_chosen
   df_plot$qval_no_zero <- ifelse(df_plot$pearson.q_vals.min_delta_0.5 == 0, 1e-10, df_plot$pearson.q_vals.min_delta_0.5)
