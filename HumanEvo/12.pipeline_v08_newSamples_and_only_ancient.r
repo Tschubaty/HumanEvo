@@ -3798,7 +3798,7 @@ if (FALSE) {
 if (FALSE) {
   min_delta <- 0.5
   max_q <- 0.05
-  ONLY_ANCIENT <- TRUE
+  ONLY_ANCIENT <- FALSE
   
   if(ONLY_ANCIENT){
     load_variable_if_not_exists(
@@ -8981,3 +8981,39 @@ for (sample_name in methylation_samples) {
   
   message("Exported ", sample_name, " to ", bw_file)
 }
+
+
+
+
+#### test
+# all_CpG.39.samples.merged.hg19 <- readRDS(
+#   "F:/Meshorer Lab/HumanEvo_master/HumanEvo/methylation+chip/all_CpG.39.samples.merged.hg19.rds"
+# )
+# 
+# load_variable_if_not_exists(
+#   variable_name = "all_CpG_complete_with_test_chosen",
+#   file_path = file.path(
+#     this.dir,
+#     "12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds"
+#   )
+# )
+
+
+#all_CpG.39.samples.merged.hg19 <- all_CpG_hg19_cut_peak_annotation
+
+# HAD COREECTR DF  readRDS("C:/Users/Daniel Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/45.pearson.CpG_permutation.min_delta.0.5/all_CpG_complete_with_test.45.qval.directional.rds")
+
+# df <- all_CpG_complete_with_test.45.qval.directional
+df <- H3K27ac.only.39.samples.merged.hg19
+
+meth_values_old  <- df[, colnames(df) %in% as.character(meta$sample)]
+meth_max <- do.call(pmax, c(meth_values_old, na.rm = TRUE))
+meth_min <- do.call(pmin, c(meth_values_old, na.rm = TRUE))
+pearson.delta <- meth_max - meth_min
+df$pearson.delta <- pearson.delta
+
+hist(df$pearson.delta)
+sum(complete.cases(meth_values_old))
+nrow(meth_values_old)
+sum(complete.cases(meth_values_old) & pearson.delta > 0.5)
+# sum(complete.cases(meth_values_old) & pearson.delta > 0.5)/nrow(meth_values_old)
