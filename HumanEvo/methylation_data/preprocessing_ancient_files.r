@@ -745,3 +745,73 @@ out_pdf <- file.path(plot_dir, "acf_chr1_all_samples_grid.pdf")
 ggsave(out_pdf, final_grob, width = 5 * 7, height = 9 * 4, dpi = 300, limitsize = FALSE)
 
 message("Saved big grid plots:\n - ", out_png, "\n - ", out_pdf)
+
+#################### save  new dataframe 
+
+
+library(data.table)
+library(zoo)
+
+final_dt_extended_smoothed <- copy(final_dt_extended)
+
+modern_samples <- meta$sample[meta$Type == "Modern"]
+stopifnot(length(modern_samples) > 0)
+
+# IMPORTANT: order inside chromosome
+# adjust "start" to your coordinate column if different
+setorder(final_dt_extended, chrom, start)
+
+k <- 31
+min_non_na <- 1  # change if you want stricter/looser
+
+ma31_safe <- function(x, k = 31, min_non_na = 16) {
+  zoo::rollapply(
+    x,
+    width = k,
+    align = "center",
+    fill = NA,
+    partial = FALSE,
+    FUN = function(w) {
+      n_ok <- sum(!is.na(w))
+      if (n_ok < min_non_na) NA_real_ else mean(w, na.rm = TRUE)
+    }
+  )
+}
+
+for (s in modern_samples) {
+  cat("Smoothing:", s, "\n")
+
+  final_dt_extended_smoothed[
+    ,
+    {
+      x <- get(s)
+
+      n_ok <- frollsum(!is.na(x), n = k, align = "center", fill = NA_integer_)
+      sx   <- frollsum(fifelse(is.na(x), 0, x), n = k, align = "center", fill = NA_real_)
+
+      out <- fifelse(is.na(n_ok) | n_ok == 0, NA_real_, sx / n_ok)
+
+      .(tmp_smoothed = out)
+    },
+    by = chrom
+  ][, (s) := tmp_smoothed][, tmp_smoothed := NULL]
+}
+
+
+rds_path_full <- file.path(
+  dirname(this.dir),
+  "methylation+chip",
+  "all_CpG.45.samples.histogram.merged2026.hg19.rds"
+)
+
+saveRDS(final_dt_extended_smoothed, rds_path_full)
+
+saveRDS(
+  object = final_dt_extended_smoothed[final_dt_extended_smoothed$name != "NO_CHIP", ],
+  file = file.path(
+    dirname(this.dir),
+    "methylation+chip",
+    "H3K27ac.only.45.samples.histogram.merged2026.hg19.rds"
+  )
+)
+
