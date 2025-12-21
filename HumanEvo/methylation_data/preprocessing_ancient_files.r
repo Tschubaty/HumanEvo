@@ -309,7 +309,27 @@ saveRDS(object = final_dt_extended,
 saveRDS(object = final_dt_extended[final_dt_extended$name != "NO_CHIP",],
         file = file.path(dirname(this.dir),"methylation+chip","H3K27ac.only.45.samples.histogram.merged2025.hg19.rds"))
 }
+
+
 # soothin#######################################################
+
+# load ata if not loade
+
+# load the full object back into final_dt_extended
+rds_path_full <- file.path(dirname(this.dir), "methylation+chip", "all_CpG.45.samples.histogram.merged2025.hg19.rds")
+if (!file.exists(rds_path_full)) stop("File not found: ", rds_path_full)
+final_dt_extended <- readRDS(rds_path_full)
+
+# load the filtered object back (into a new variable name)
+rds_path_filtered <- file.path(dirname(this.dir), "methylation+chip", "H3K27ac.only.45.samples.histogram.merged2025.hg19.rds")
+if (!file.exists(rds_path_filtered)) stop("File not found: ", rds_path_filtered)
+H3K27ac.only.45.samples.histogram.merged2025.hg19 <- readRDS(rds_path_filtered)
+
+
+
+
+
+
 library(data.table)
 library(zoo)  # For moving average
 
@@ -369,9 +389,8 @@ library(ggplot2)
     return(acf_vals)
   }  
   
-  biosample <- "S1153"
-  
-df_raw <- final_dt_extended[, biosample]
+
+df_raw <- final_dt_extended[, "S1153"]
 
 # Compute ACF with missing values handled correctly
 acf_values <- custom_acf(df_raw, max_lag = 100)
@@ -446,7 +465,7 @@ for(biosample in smoothing_estimates$biosamples) {
                color = "red") +
     theme_minimal() +
     labs(
-      title = paste0("Autocorrelation Function (ACF) of Smoothed Data ", biosample),
+      title = paste0("Autocorrelation Function (ACF) of ", biosample),
       x = "Lag (Genomic Positions)",
       y = "Autocorrelation"
     )
@@ -596,3 +615,133 @@ for (biosample in smoothing_estimates$biosamples) {
   cat("Estimated Smoothing Window (Elbow Point):", elbow_point, "\n")
 }
 
+
+########### same code as grid plto output 
+
+# Minimal edits to collect all per-sample plots into one big grid and save once at the end.
+library(data.table)
+library(ggplot2)
+library(gridExtra)
+
+# Create plots folder
+plot_dir <- file.path(dirname(this.dir), "methylation+chip", "plots")
+dir.create(plot_dir, showWarnings = FALSE, recursive = TRUE)
+
+# Load old dataset
+old_data <- readRDS(file.path(dirname(this.dir), "methylation+chip", "all_CpG.39.samples.merged.hg19.rds"))
+
+smoothing_estimates <- data.frame(biosamples = meta$sample, estimation = NA)
+
+# NEW: collect combined grobs here
+plot_list <- list()
+
+for (biosample in smoothing_estimates$biosamples) {
+  
+  #biosample <- smoothing_estimates$biosamples[1]
+  print(biosample)
+  # New data ACF
+  df_meth_new <- final_dt_extended[chrom == "chr1", ..biosample][[1]]
+  acf_values_new <- custom_acf(df_meth_new, max_lag = 100)
+  
+  acf_df_new <- data.table(lag = 0:100, acf = acf_values_new)
+  acf_df_new[, diff1 := c(NA, diff(acf))]
+  acf_df_new[, diff2 := c(NA, diff(diff1))]
+  elbow_point <- acf_df_new[which.max(diff2), lag]
+  
+  p_new <- ggplot(acf_df_new, aes(x = lag, y = acf)) +
+    geom_line(color = "darkgreen") +
+    geom_point() +
+    geom_vline(xintercept = elbow_point - 1, linetype = "dotted", color = "blue") +
+    geom_hline(yintercept = acf_df_new$acf[elbow_point], linetype = "dashed", color = "red") +
+    theme_minimal() +
+    labs(title = paste0(biosample," Hist. Matched ACF elbow_point: ",elbow_point), x = "Lag", y = "ACF")
+  
+  # Save elbow point
+  smoothing_estimates$estimation[smoothing_estimates$biosamples == biosample] <- elbow_point
+  
+  # Old data ACF (if sample exists)
+  if (biosample %in% colnames(old_data)) {
+    df_meth_old <- old_data[old_data$chrom == "chr1", biosample]
+    acf_values_old <- custom_acf(df_meth_old, max_lag = 100)
+    acf_df_old <- data.table(lag = 0:100, acf = acf_values_old)
+    
+    p_old <- ggplot(acf_df_old, aes(x = lag, y = acf)) +
+      geom_line(color = "darkred") +
+      geom_point() +
+      theme_minimal() +
+      labs(title = paste0(biosample, " Old ACF"), x = "Lag", y = "ACF")
+    
+    # MINIMAL CHANGE: create a grob (do not save per-sample), append to list
+    plot_list[[length(plot_list) + 1]] <- arrangeGrob(p_new, p_old, ncol = 2)
+    }else {
+      
+      # ----------------------------
+      # Smoothed data (31-CpG ±15)
+      # ----------------------------
+      df_meth_new_raw <- final_dt_extended[chrom == "chr1", ..biosample][[1]]
+      df_meth_new_ma31 <- zoo::rollmean(df_meth_new_raw, k = 31, align = "center", fill = NA)
+      
+      acf_values_ma31 <- custom_acf(df_meth_new_ma31[!is.na(df_meth_new_ma31)], max_lag = 100)
+      acf_df_ma31 <- data.table(lag = 0:100, acf = acf_values_ma31)
+      
+      # elbow detection (IDENTICAL logic to p_new)
+      acf_df_ma31[, diff1 := c(NA, diff(acf))]
+      acf_df_ma31[, diff2 := c(NA, diff(diff1))]
+      elbow_point_ma31 <- acf_df_ma31[which.max(diff2), lag]
+      
+      p_ma31 <- ggplot(acf_df_ma31, aes(x = lag, y = acf)) +
+        geom_line(color = "darkgreen") +
+        geom_point() +
+        geom_vline(
+          xintercept = elbow_point_ma31 - 1,
+          linetype = "dotted",
+          color = "blue"
+        ) +
+        geom_hline(
+          yintercept = acf_df_ma31$acf[elbow_point_ma31],
+          linetype = "dashed",
+          color = "red"
+        ) +
+        theme_minimal() +
+        labs(
+          title = paste0(
+            biosample,
+            " NEW ACF (31-CpG MA) elbow_point: ",
+            elbow_point_ma31
+          ),
+          x = "Lag",
+          y = "ACF"
+        )
+      
+      # ----------------------------
+      # Combine: raw vs MA31
+      # ----------------------------
+      plot_list[[length(plot_list) + 1]] <- arrangeGrob(
+        p_ma31,
+        p_new,
+        ncol = 2,
+        widths = c(1, 1)
+      )
+  }
+    
+  
+  cat("Estimated Smoothing Window (Elbow Point):", elbow_point, "\n")
+}
+
+# AFTER loop: arrange all collected grobs into one big grid and save
+# Arrange all sample grobs in a 5 x 9 grid (5 columns, 9 rows)
+# If fewer/more samples, grid will adapt but preferred layout is 5x9 for 45 samples.
+final_grob <- do.call(arrangeGrob, c(plot_list, ncol = 5))
+
+# Save big PNG and PDF. Adjust height per sample if needed.
+n_samples <- length(plot_list)
+
+out_png <- file.path(plot_dir, "acf_chr1_all_samples_grid.png")
+# width ≈ 5 * 2.4, height ≈ 9 * 2.4 (tweak 2.4 if you want larger/smaller panels)
+ggsave(out_png, final_grob, width = 5 * 2.4, height = 9 * 2.4, dpi = 300, limitsize = FALSE)
+
+out_pdf <- file.path(plot_dir, "acf_chr1_all_samples_grid.pdf")
+# width ≈ 5 * 2.4, height ≈ 9 * 2.4 (tweak 2.4 if you want larger/smaller panels)
+ggsave(out_pdf, final_grob, width = 5 * 7, height = 9 * 4, dpi = 300, limitsize = FALSE)
+
+message("Saved big grid plots:\n - ", out_png, "\n - ", out_pdf)
