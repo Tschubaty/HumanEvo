@@ -1322,7 +1322,7 @@ compute_empirical_qvals_with_saved_permutations <- function(df,
 
 
 
-# all_CpG_states_hg19.rds creation ---------------------------------------------
+# done26 all_CpG_states_hg19.rds creation ---------------------------------------------
 if(FALSE){
 
   load_variable_if_not_exists(
@@ -1457,7 +1457,7 @@ if(FALSE){
 }
 
 
-# done25 Genome wide Analysis "complete_with_test" creation --------------------
+# done26 Genome wide Analysis "complete_with_test" creation --------------------
 if (Genome_wide_Analysis) {
   # create results folder
   folder_name <- file.path(OUTPUT_FOLDER, "results", "WholeGenome")
@@ -1551,7 +1551,7 @@ if (Genome_wide_Analysis) {
 
 
 
-# done25 compute_all_CpG_complete_with_test.45 -all_CpG_complete_with_test.45 -----------------------------------------------------------------------
+# done26 compute_all_CpG_complete_with_test.45 -all_CpG_complete_with_test.45 -----------------------------------------------------------------------
 if (FALSE) {
   # compine all chr data to big df
   all_CpG_complete_with_test.45 <- data.frame()
@@ -1598,7 +1598,606 @@ if (FALSE) {
 
 
 
-# done25 H3K27ac Analysis --------------------------------------------------------
+# done26 df_state  -----------------------------------------------------------------------
+if (compute_df_state) {
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
+    )
+  )
+  
+  state_column_names <-
+    c(
+      "state",
+      "mean_methylation",
+      "sd_methylation",
+      "mean_delta",
+      "sd_delta",
+      "mean_minus_log_p",
+      "sd_minus_log_p",
+      "n_total",
+      "n_H3K27AC"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state <-
+    data.frame(matrix(
+      NA,
+      nrow = length(state_names),
+      ncol = length(state_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state) <- state_column_names
+  
+  r <- 1
+  for (state in  state_names) {
+    print(state)
+    
+    df_state$state[r] <- state
+    
+    index <- all_CpG_complete_with_test.45$state == state
+    meth <-
+      all_CpG_complete_with_test.45[index, as.character(meta$sample)]
+    df_state$mean_delta[r] <-
+      mean(all_CpG_complete_with_test.45$pearson.delta[index],na.rm = TRUE)
+    df_state$sd_delta[r] <-
+      sd(all_CpG_complete_with_test.45$pearson.delta[index],na.rm = TRUE)
+    df_state$mean_minus_log_p[r] <-
+      mean(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
+    df_state$sd_minus_log_p[r] <-
+      sd(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
+    df_state$mean_methylation[r] <-
+      mean(as.matrix(meth),na.rm = TRUE)
+    df_state$sd_methylation[r] <-
+      sd(as.matrix(meth),na.rm = TRUE)
+    df_state$n_total[r] <- sum(index)
+    df_state$n_H3K27AC[r] <-
+      sum(index & all_CpG_complete_with_test.45$name != "NO_CHIP")
+    r <- r + 1
+  }
+  
+  n_all_CpG <- sum(df_state$n_total)
+  n_H3K27AC_CpG <- sum(df_state$n_H3K27AC)
+  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
+  
+  df_state$expected <-
+    df_state$n_total * expected_fraction
+  
+  df_state$state <-
+    factor(x = df_state$state,
+           levels = state_names)
+  
+  
+  matching_indices <-
+    match(
+      df_state$state,
+      paste(
+        df_universal_annotation$state_order_by_group,
+        df_universal_annotation$`States  presented in paper`,
+        sep = "_"
+      )
+    )
+  df_state$state <-
+    factor(df_state$state, levels = df_state$state)
+  df_state$state_color <-
+    factor(df_universal_annotation$color[matching_indices],
+           levels = unique(df_universal_annotation$color))
+  df_state$state_group <-
+    factor(df_universal_annotation$Group[matching_indices],
+           levels = unique(df_universal_annotation$Group))
+  
+  df_state$p_val_test_all_methylation_KW <- NA
+  
+  for (st in state_names) {
+    print(st)
+    meth <-
+      data.table::setDT(all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$state == st, as.character(meta$sample)])
+    meth <-
+      data.table::melt(
+        data = meth,
+        id.vars = NULL,
+        variable.name = "sample",
+        value.name = "methylation"
+      )
+    # # Perform Kruskal-Wallis test
+    kw_state <- kruskal.test(methylation ~ sample, data = meth)
+    df_state$p_val_test_all_methylation_KW[df_state$state == st] <-
+      format.pval(kw_state$p.value, digits = 3)
+  }
+  
+  saveRDS(
+    object = df_state,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state", "rds", sep = ".")
+    )
+  )
+}
+
+
+
+# done26 df_state_group  -----------------------------------------------------------------------
+if (compute_df_state_group) {
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
+    )
+  )
+  
+  state_group_column_names <-
+    c(
+      "state_group",
+      "mean_methylation",
+      "sd_methylation",
+      "mean_delta",
+      "sd_delta",
+      "mean_minus_log_p",
+      "sd_minus_log_p",
+      "n_total",
+      "n_H3K27AC"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state_group <-
+    data.frame(matrix(
+      NA,
+      nrow = length(unique(df_universal_annotation$Group)),
+      ncol = length(state_group_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_group) <- state_group_column_names
+  
+  r <- 1
+  for (sg in  unique(df_universal_annotation$Group)) {
+    print(sg)
+    
+    df_state_group$state_group[r] <- sg
+    
+    index <- all_CpG_complete_with_test.45$state_group == sg
+    meth <-
+      all_CpG_complete_with_test.45[index, as.character(meta$sample)]
+    
+    df_state_group$mean_delta[r] <-
+      mean(all_CpG_complete_with_test.45$pearson.delta[index],na.rm = TRUE)
+    df_state_group$sd_delta[r] <-
+      sd(all_CpG_complete_with_test.45$pearson.delta[index],na.rm = TRUE)
+    df_state_group$mean_minus_log_p[r] <-
+      mean(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
+    df_state_group$sd_minus_log_p[r] <-
+      sd(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
+    df_state_group$mean_methylation[r] <-
+      mean(as.matrix(meth),na.rm = TRUE)
+    df_state_group$sd_methylation[r] <-
+      sd(as.matrix(meth),na.rm = TRUE)
+    df_state_group$n_total[r] <- sum(index,na.rm = TRUE)
+    df_state_group$n_H3K27AC[r] <-
+      sum(index & all_CpG_complete_with_test.45$name != "NO_CHIP",na.rm = TRUE)
+    r <- r + 1
+  }
+  
+  n_all_CpG <- sum(df_state_group$n_total)
+  n_H3K27AC_CpG <- sum(df_state_group$n_H3K27AC)
+  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
+  
+  df_state_group$expected_n_H3K27AC <-
+    df_state_group$n_total * expected_fraction
+  
+  df_state_group$state_group <- factor(x = df_state_group$state_group,levels = df_state_group$state_group)
+  
+  df_state_group$color <- unique(as.character(df_universal_annotation$color))
+  
+  saveRDS(
+    object = df_state_group,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state_group", "rds", sep = ".")
+    )
+  )
+}
+
+# done26 df_state_sample  -----------------------------------------------------------------------
+if (compute_df_state_sample) {
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      "all_CpG_complete_with_test.45.rds" 
+    )
+  )
+  
+  all_CpG_complete_with_test.45 <- as.data.frame(all_CpG_complete_with_test.45)
+  
+  #df_state_sample <- summary_df <- aggregate(. ~ state, data =  all_CpG_complete_with_test.45[,c("state",as.character(meta$sample))], FUN = mean)
+  state_summery_column_names <-
+    c(
+      "state",
+      "sample",
+      "mean_methylation",
+      "sd_methylation",
+      "methylation_H3K27AC",
+      "methylation_NO_CHIP"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state_sample <-
+    data.frame(matrix(
+      NA,
+      nrow = length(state_names) * nrow(meta),
+      ncol = length(state_summery_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_sample) <- state_summery_column_names
+  
+  r <- 1
+  for (state in  state_names) {
+    print(state)
+    for (sample in as.character(meta$sample)) {
+      df_state_sample$state[r] <- state
+      df_state_sample$sample[r] <- sample
+      
+      index <- all_CpG_complete_with_test.45$state == state
+      meth_column <- all_CpG_complete_with_test.45[, sample]
+      meth <- meth_column[index]
+      
+      df_state_sample$mean_methylation[r] <- mean(meth,na.rm = TRUE)
+      df_state_sample$sd_methylation[r] <- sd(meth,na.rm = TRUE)
+      
+      df_state_sample$methylation_H3K27AC[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test.45$name != "NO_CHIP"],na.rm = TRUE)
+      df_state_sample$methylation_NO_CHIP[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test.45$name == "NO_CHIP"],na.rm = TRUE)
+      
+      r <- r + 1
+    }
+  }
+  
+  # change state to factor
+  df_state_sample$state <-
+    factor(x = df_state_sample$state, levels = state_names)
+  
+  # annotate states
+  matching_indices <-
+    match(
+      df_state_sample$state,
+      paste(
+        df_universal_annotation$state_order_by_group,
+        df_universal_annotation$`States  presented in paper`,
+        sep = "_"
+      )
+    )
+  df_state_sample$state_color <-
+    df_universal_annotation$color[matching_indices]
+  df_state_sample$state_group <-
+    factor(df_universal_annotation$Group[matching_indices],
+           levels = unique(df_universal_annotation$Group))
+  # annotate type
+  matching_indices <- match(df_state_sample$sample, meta$sample)
+  df_state_sample$type <- meta$Type[matching_indices]
+  
+  # match color
+  matching_indices <-
+    match(df_state_sample$type, mean_age_by_type$Type)
+  df_state_sample$type_color <-
+    mean_age_by_type$color[matching_indices]
+  df_state_sample$type <-
+    factor(x = df_state_sample$type , levels = mean_age_by_type$Type)
+  
+  saveRDS(
+    object = df_state_sample,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state_sample", "rds", sep = ".")
+    )
+  )
+}
+
+# done26 df_state_group_sample  -----------------------------------------------------------------------
+if (compute_df_state_group_sample) {
+  
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
+    )
+  )
+  
+  state_group_sample_summery_column_names <-
+    c(
+      "state_group",
+      "sample",
+      "mean_methylation",
+      "sd_methylation",
+      "methylation_H3K27AC",
+      "methylation_NO_CHIP"
+    )
+  
+  # Create an empty data frame with the specified column names
+  df_state_group_sample <-
+    data.frame(matrix(
+      NA,
+      nrow = length(unique(df_universal_annotation$Group)) * nrow(meta),
+      ncol = length(state_group_sample_summery_column_names)
+    ))
+  
+  # Rename the columns
+  colnames(df_state_group_sample) <- state_group_sample_summery_column_names
+  
+  r <- 1
+  for (sg in unique(df_universal_annotation$Group)) {
+    print(sg)
+    for (sample in as.character(meta$sample)) {
+      print(sample)
+      df_state_group_sample$state_group[r] <- sg
+      df_state_group_sample$sample[r] <- sample
+      
+      index <- all_CpG_complete_with_test.45$state_group == sg
+      meth_column <- all_CpG_complete_with_test.45[, sample]
+      meth <- meth_column[index]
+      
+      df_state_group_sample$mean_methylation[r] <- mean(meth,na.rm = TRUE)
+      df_state_group_sample$sd_methylation[r] <- sd(meth,na.rm = TRUE)
+      
+      df_state_group_sample$methylation_H3K27AC[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test.45$name != "NO_CHIP"])
+      df_state_group_sample$methylation_NO_CHIP[r] <-
+        mean(meth_column[index &
+                           all_CpG_complete_with_test.45$name == "NO_CHIP"])
+      
+      r <- r + 1
+    }
+  }
+  
+  # change state to factor
+  df_state_group_sample$state_group <-
+    factor(x = df_state_group_sample$state_group, levels = unique(df_universal_annotation$Group))
+  
+  # annotate states
+  matching_indices <-
+    match(
+      df_state_group_sample$state_group,
+      unique(df_universal_annotation$Group)
+    )
+  df_state_group_sample$state_group_color <-
+    df_universal_annotation$color[matching_indices]
+  
+  # annotate type
+  matching_indices <- match(df_state_group_sample$sample, meta$sample)
+  df_state_group_sample$type <- meta$Type[matching_indices]
+  
+  # match color
+  matching_indices <-
+    match(df_state_group_sample$type, mean_age_by_type$Type)
+  df_state_group_sample$type_color <-
+    mean_age_by_type$color[matching_indices]
+  df_state_group_sample$type <-
+    factor(x = df_state_group_sample$type , levels = mean_age_by_type$Type)
+  
+  saveRDS(
+    object = df_state_group_sample,
+    file = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("df_state_group_sample", "rds", sep = ".")
+    )
+  )
+}
+
+
+# compare smoothed vs unsmoothed 
+if(FALSE){
+  # load data
+  load_variable_if_not_exists(
+    variable_name = "all_CpG_complete_with_test.45",
+    file_path = file.path(
+      OUTPUT_FOLDER,
+      "results",
+      "WholeGenome",
+      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
+    )
+  )
+  all_CpG_complete_with_test.45_not_smoothed <- readRDS("C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/12.pipeline/results/WholeGenome/all_CpG_complete_with_test.45.rds")
+  
+  
+  library(ggplot2)
+  library(dplyr)
+  library(patchwork)
+  
+  # add label column
+  df_unsmoothed <- all_CpG_complete_with_test.45_not_smoothed %>%
+    mutate(type = "unsmoothed")
+  
+  df_smoothed <- all_CpG_complete_with_test.45 %>%
+    mutate(type = "smoothed")
+  
+  # histogram unsmoothed
+  p1 <- ggplot(df_unsmoothed, aes(x = pearson.statistic)) +
+    geom_histogram(bins = 100) +
+    theme_classic() +
+    labs(title = "Pearson statistic – unsmoothed", x = NULL)
+  
+  # histogram smoothed
+  p2 <- ggplot(df_smoothed, aes(x = pearson.statistic)) +
+    geom_histogram(bins = 100) +
+    theme_classic() +
+    labs(title = "Pearson statistic – smoothed", x = "pearson.statistic")
+  
+  # stack plots
+  p1 / p2
+  
+  
+  
+  library(ggplot2)
+  
+  # counts (no merging)
+  n_uns <- sum(all_CpG_complete_with_test.45_not_smoothed$pearson.delta > 0.5, na.rm = TRUE)
+  n_smo <- sum(all_CpG_complete_with_test.45$pearson.delta > 0.5, na.rm = TRUE)
+  
+  df_counts <- data.frame(
+    type  = c("unsmoothed", "smoothed"),
+    count = c(n_uns, n_smo)
+  )
+  
+  ggplot(df_counts, aes(x = type, y = count)) +
+    geom_col() +
+    theme_classic(base_size = 14) +
+    labs(x = NULL, y = "entries with pearson.delta > 0.5")
+  
+  
+  
+  library(ggplot2) # h3k27ac & min delta 
+  
+
+  df_uns <- all_CpG_complete_with_test.45_not_smoothed[
+    all_CpG_complete_with_test.45_not_smoothed$name != "NO_CHIP" &
+      all_CpG_complete_with_test.45_not_smoothed$pearson.delta > 0.5,
+  ]
+  
+  df_smo <- all_CpG_complete_with_test.45[
+    all_CpG_complete_with_test.45$name != "NO_CHIP" &
+      all_CpG_complete_with_test.45$pearson.delta > 0.5,
+  ]
+  
+  library(data.table)
+  
+  setDT(df_uns)
+  setDT(df_smo)
+  
+  
+  ggplot() +
+    geom_histogram(
+      data = df_uns,
+      aes(x = pearson.statistic, fill = "unsmoothed"),
+      bins = 150,
+      alpha = 0.5
+    ) +
+    geom_histogram(
+      data = df_smo,
+      aes(x = pearson.statistic, fill = "smoothed"),
+      bins = 150,
+      alpha = 0.5
+    ) +
+    scale_fill_manual(
+      name   = NULL,
+      values = c(
+        unsmoothed = "steelblue",
+        smoothed   = "firebrick"
+      )
+    ) +
+    theme_classic(base_size = 14) +
+    labs(
+      title = "cpg in H3K27ac with min delta",
+      x = "pearson.statistic",
+      y = "count"
+    )
+  
+  
+  ggplot(df_counts, aes(x = type, y = count, fill = type)) +
+    geom_col() +
+    geom_text(
+      aes(label = count),
+      vjust = -0.4,
+      size = 4,
+      fontface = "bold"
+    ) +
+    scale_fill_manual(
+      name   = NULL,
+      values = c(
+        unsmoothed = "steelblue",
+        smoothed   = "firebrick"
+      )
+    ) +
+    theme_classic(base_size = 14) +
+    labs(
+      title = "#cpg in H3K27ac with min delta",
+      x = NULL,
+      y = "entries"
+    )
+  
+  
+  #PCA
+  library(ggplot2)
+  library(patchwork)
+  
+  sample_cols <- as.character(meta$sample)
+  sample_type <- setNames(as.character(meta$Type),
+                          as.character(meta$sample))
+
+  
+  # PCA on samples (transpose: rows = samples)
+  mat_uns <- as.matrix(df_uns[, sample_cols, drop = FALSE,with = FALSE])
+  mat_smo <- as.matrix(df_smo[, sample_cols, drop = FALSE,with = FALSE])
+  
+  pca_uns <- prcomp(t(mat_uns), center = TRUE, scale. = TRUE)
+  pca_smo <- prcomp(t(mat_smo), center = TRUE, scale. = TRUE)
+  
+  df_pca_uns <- data.frame(sample = rownames(pca_uns$x), PC1 = pca_uns$x[,1], PC2 = pca_uns$x[,2])
+  df_pca_smo <- data.frame(sample = rownames(pca_smo$x), PC1 = pca_smo$x[,1], PC2 = pca_smo$x[,2])
+  
+  
+  df_pca_uns$Type <- sample_type[df_pca_uns$sample]
+  df_pca_smo$Type <- sample_type[df_pca_smo$sample]
+  df_pca_uns$Type <- factor(df_pca_uns$Type)
+  df_pca_smo$Type <- factor(df_pca_smo$Type)
+  
+  
+  p1 <- ggplot(df_pca_uns, aes(PC1, PC2, color = Type, label = sample)) +
+    geom_point(size = 3) +
+    geom_text(vjust = -0.6, size = 3) +
+    theme_classic(base_size = 14) +
+    labs(
+      title = "PCA (samples) – unsmoothed",
+      x = "PC1",
+      y = "PC2",
+      color = "Type"
+    )
+  
+  p2 <- ggplot(df_pca_smo, aes(PC1, PC2, color = Type, label = sample)) +
+    geom_point(size = 3) +
+    geom_text(vjust = -0.6, size = 3) +
+    theme_classic(base_size = 14) +
+    labs(
+      title = "PCA (samples) – smoothed",
+      x = "PC1",
+      y = "PC2",
+      color = "Type"
+    )
+  
+  p1 / p2
+  
+}
+
+
+
+# done26 H3K27ac Analysis --------------------------------------------------------
 if (H3K27ac_Analysis) {  
   # Figure S2
   
@@ -1745,7 +2344,7 @@ if (H3K27ac_Analysis) {
              gsub('_.*', replacement = "", x = state_segementation_meta$state)
            ))])
   
-  state_segementation_meta$state_group <- 
+  #state_segementation_meta$state_group <- 
     
     p <-
     ggplot(
@@ -1856,422 +2455,8 @@ if (H3K27ac_Analysis) {
 }
 
 
-# done25 df_state_group  -----------------------------------------------------------------------
-if (compute_df_state_group) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test.45",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
-    )
-  )
-  
-  state_group_column_names <-
-    c(
-      "state_group",
-      "mean_methylation",
-      "sd_methylation",
-      "mean_delta",
-      "sd_delta",
-      "mean_minus_log_p",
-      "sd_minus_log_p",
-      "n_total",
-      "n_H3K27AC"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_state_group <-
-    data.frame(matrix(
-      NA,
-      nrow = length(unique(df_universal_annotation$Group)),
-      ncol = length(state_group_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_state_group) <- state_group_column_names
-  
-  r <- 1
-  for (sg in  unique(df_universal_annotation$Group)) {
-    print(sg)
-    
-    df_state_group$state_group[r] <- sg
-    
-    index <- all_CpG_complete_with_test.45$state_group == sg
-    meth <-
-      all_CpG_complete_with_test.45[index, as.character(meta$sample)]
-    
-    df_state_group$mean_delta[r] <-
-      mean(all_CpG_complete_with_test.45$pearson.delta[index])
-    df_state_group$sd_delta[r] <-
-      sd(all_CpG_complete_with_test.45$pearson.delta[index])
-    df_state_group$mean_minus_log_p[r] <-
-      mean(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
-    df_state_group$sd_minus_log_p[r] <-
-      sd(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
-    df_state_group$mean_methylation[r] <-
-      mean(as.matrix(meth))
-    df_state_group$sd_methylation[r] <-
-      sd(as.matrix(meth))
-    df_state_group$n_total[r] <- sum(index)
-    df_state_group$n_H3K27AC[r] <-
-      sum(index & all_CpG_complete_with_test.45$name != "NO_CHIP")
-    r <- r + 1
-  }
-  
-  n_all_CpG <- sum(df_state_group$n_total)
-  n_H3K27AC_CpG <- sum(df_state_group$n_H3K27AC)
-  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
-  
-  df_state_group$expected_n_H3K27AC <-
-    df_state_group$n_total * expected_fraction
-  
-  df_state_group$state_group <- factor(x = df_state_group$state_group,levels = df_state_group$state_group)
-  
-  df_state_group$color <- unique(as.character(df_universal_annotation$color))
-  
-  saveRDS(
-    object = df_state_group,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("df_state_group", "rds", sep = ".")
-    )
-  )
-}
 
-
-
-
-
-
-
-# done25 df_state_sample  -----------------------------------------------------------------------
-if (compute_df_state_sample) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test.45",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      "all_CpG_complete_with_test.45.rds" 
-    )
-  )
-  
-  all_CpG_complete_with_test.45 <- as.data.frame(all_CpG_complete_with_test.45)
-  
-  #df_state_sample <- summary_df <- aggregate(. ~ state, data =  all_CpG_complete_with_test.45[,c("state",as.character(meta$sample))], FUN = mean)
-  state_summery_column_names <-
-    c(
-      "state",
-      "sample",
-      "mean_methylation",
-      "sd_methylation",
-      "methylation_H3K27AC",
-      "methylation_NO_CHIP"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_state_sample <-
-    data.frame(matrix(
-      NA,
-      nrow = length(state_names) * nrow(meta),
-      ncol = length(state_summery_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_state_sample) <- state_summery_column_names
-  
-  r <- 1
-  for (state in  state_names) {
-    print(state)
-    for (sample in as.character(meta$sample)) {
-      df_state_sample$state[r] <- state
-      df_state_sample$sample[r] <- sample
-      
-      index <- all_CpG_complete_with_test.45$state == state
-      meth_column <- all_CpG_complete_with_test.45[, sample]
-      meth <- meth_column[index]
-      
-      df_state_sample$mean_methylation[r] <- mean(meth)
-      df_state_sample$sd_methylation[r] <- sd(meth)
-      
-      df_state_sample$methylation_H3K27AC[r] <-
-        mean(meth_column[index &
-                           all_CpG_complete_with_test.45$name != "NO_CHIP"])
-      df_state_sample$methylation_NO_CHIP[r] <-
-        mean(meth_column[index &
-                           all_CpG_complete_with_test.45$name == "NO_CHIP"])
-      
-      r <- r + 1
-    }
-  }
-  
-  # change state to factor
-  df_state_sample$state <-
-    factor(x = df_state_sample$state, levels = state_names)
-  
-  # annotate states
-  matching_indices <-
-    match(
-      df_state_sample$state,
-      paste(
-        df_universal_annotation$state_order_by_group,
-        df_universal_annotation$`States  presented in paper`,
-        sep = "_"
-      )
-    )
-  df_state_sample$state_color <-
-    df_universal_annotation$color[matching_indices]
-  df_state_sample$state_group <-
-    factor(df_universal_annotation$Group[matching_indices],
-           levels = unique(df_universal_annotation$Group))
-  # annotate type
-  matching_indices <- match(df_state_sample$sample, meta$sample)
-  df_state_sample$type <- meta$Type[matching_indices]
-  
-  # match color
-  matching_indices <-
-    match(df_state_sample$type, mean_age_by_type$Type)
-  df_state_sample$type_color <-
-    mean_age_by_type$color[matching_indices]
-  df_state_sample$type <-
-    factor(x = df_state_sample$type , levels = mean_age_by_type$Type)
-  
-  saveRDS(
-    object = df_state_sample,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("df_state_sample", "rds", sep = ".")
-    )
-  )
-}
-# done25 df_state_group_sample  -----------------------------------------------------------------------
-if (compute_df_state_group_sample) {
-  
-  load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test.45",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
-    )
-  )
-  
-  state_group_sample_summery_column_names <-
-    c(
-      "state_group",
-      "sample",
-      "mean_methylation",
-      "sd_methylation",
-      "methylation_H3K27AC",
-      "methylation_NO_CHIP"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_state_group_sample <-
-    data.frame(matrix(
-      NA,
-      nrow = length(unique(df_universal_annotation$Group)) * nrow(meta),
-      ncol = length(state_group_sample_summery_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_state_group_sample) <- state_group_sample_summery_column_names
-  
-  r <- 1
-  for (sg in unique(df_universal_annotation$Group)) {
-    print(sg)
-    for (sample in as.character(meta$sample)) {
-      print(sample)
-      df_state_group_sample$state_group[r] <- sg
-      df_state_group_sample$sample[r] <- sample
-      
-      index <- all_CpG_complete_with_test.45$state_group == sg
-      meth_column <- all_CpG_complete_with_test.45[, sample]
-      meth <- meth_column[index]
-      
-      df_state_group_sample$mean_methylation[r] <- mean(meth)
-      df_state_group_sample$sd_methylation[r] <- sd(meth)
-      
-      df_state_group_sample$methylation_H3K27AC[r] <-
-        mean(meth_column[index &
-                           all_CpG_complete_with_test.45$name != "NO_CHIP"])
-      df_state_group_sample$methylation_NO_CHIP[r] <-
-        mean(meth_column[index &
-                           all_CpG_complete_with_test.45$name == "NO_CHIP"])
-      
-      r <- r + 1
-    }
-  }
-  
-  # change state to factor
-  df_state_group_sample$state_group <-
-    factor(x = df_state_group_sample$state_group, levels = unique(df_universal_annotation$Group))
-  
-  # annotate states
-  matching_indices <-
-    match(
-      df_state_group_sample$state_group,
-      unique(df_universal_annotation$Group)
-    )
-  df_state_group_sample$state_group_color <-
-    df_universal_annotation$color[matching_indices]
- 
-  # annotate type
-  matching_indices <- match(df_state_group_sample$sample, meta$sample)
-  df_state_group_sample$type <- meta$Type[matching_indices]
-  
-  # match color
-  matching_indices <-
-    match(df_state_group_sample$type, mean_age_by_type$Type)
-  df_state_group_sample$type_color <-
-    mean_age_by_type$color[matching_indices]
-  df_state_group_sample$type <-
-    factor(x = df_state_group_sample$type , levels = mean_age_by_type$Type)
-  
-  saveRDS(
-    object = df_state_group_sample,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("df_state_group_sample", "rds", sep = ".")
-    )
-  )
-}
-# done25 df_state  -----------------------------------------------------------------------
-if (compute_df_state) {
-  
-    load_variable_if_not_exists(
-    variable_name = "all_CpG_complete_with_test.45",
-    file_path = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("all_CpG_complete_with_test.45", "rds", sep = ".")
-    )
-  )
-  
-  state_column_names <-
-    c(
-      "state",
-      "mean_methylation",
-      "sd_methylation",
-      "mean_delta",
-      "sd_delta",
-      "mean_minus_log_p",
-      "sd_minus_log_p",
-      "n_total",
-      "n_H3K27AC"
-    )
-  
-  # Create an empty data frame with the specified column names
-  df_state <-
-    data.frame(matrix(
-      NA,
-      nrow = length(state_names),
-      ncol = length(state_column_names)
-    ))
-  
-  # Rename the columns
-  colnames(df_state) <- state_column_names
-  
-  r <- 1
-  for (state in  state_names) {
-    print(state)
-    
-    df_state$state[r] <- state
-    
-    index <- all_CpG_complete_with_test.45$state == state
-    meth <-
-      all_CpG_complete_with_test.45[index, as.character(meta$sample)]
-    df_state$mean_delta[r] <-
-      mean(all_CpG_complete_with_test.45$pearson.delta[index])
-    df_state$sd_delta[r] <-
-      sd(all_CpG_complete_with_test.45$pearson.delta[index])
-    df_state$mean_minus_log_p[r] <-
-      mean(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
-    df_state$sd_minus_log_p[r] <-
-      sd(-log(all_CpG_complete_with_test.45$pearson.p_val[index]), na.rm = TRUE)
-    df_state$mean_methylation[r] <-
-      mean(as.matrix(meth))
-    df_state$sd_methylation[r] <-
-      sd(as.matrix(meth))
-    df_state$n_total[r] <- sum(index)
-    df_state$n_H3K27AC[r] <-
-      sum(index & all_CpG_complete_with_test.45$name != "NO_CHIP")
-    r <- r + 1
-  }
-  
-  n_all_CpG <- sum(df_state$n_total)
-  n_H3K27AC_CpG <- sum(df_state$n_H3K27AC)
-  expected_fraction <- n_H3K27AC_CpG / n_all_CpG
-  
-  df_state$expected <-
-    df_state$n_total * expected_fraction
-  
-  df_state$state <-
-    factor(x = df_state$state,
-           levels = state_names)
-  
-  
-  matching_indices <-
-    match(
-      df_state$state,
-      paste(
-        df_universal_annotation$state_order_by_group,
-        df_universal_annotation$`States  presented in paper`,
-        sep = "_"
-      )
-    )
-  df_state$state <-
-    factor(df_state$state, levels = df_state$state)
-  df_state$state_color <-
-    factor(df_universal_annotation$color[matching_indices],
-           levels = unique(df_universal_annotation$color))
-  df_state$state_group <-
-    factor(df_universal_annotation$Group[matching_indices],
-           levels = unique(df_universal_annotation$Group))
-  
-  df_state$p_val_test_all_methylation_KW <- NA
-  
-  for (st in state_names) {
-    print(st)
-    meth <-
-      data.table::setDT(all_CpG_complete_with_test.45[all_CpG_complete_with_test.45$state == st, as.character(meta$sample)])
-    meth <-
-      data.table::melt(
-        data = meth,
-        id.vars = NULL,
-        variable.name = "sample",
-        value.name = "methylation"
-      )
-    # # Perform Kruskal-Wallis test
-    kw_state <- kruskal.test(methylation ~ sample, data = meth)
-    df_state$p_val_test_all_methylation_KW[df_state$state == st] <-
-      format.pval(kw_state$p.value, digits = 3)
-  }
-  
-  saveRDS(
-    object = df_state,
-    file = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      paste("df_state", "rds", sep = ".")
-    )
-  )
-}
-
-# done25 make_plots  -----------------------------------------------------------------------
+# done26 make_plots  -----------------------------------------------------------------------
 if (compute_make_plots) {
   load_variable_if_not_exists(
     variable_name = "all_CpG_complete_with_test.45",
@@ -2684,6 +2869,15 @@ if (compute_make_plots) {
   df_state$p_value_NO_CHIP <- NA
   df_state$p_value_CHIP <- NA
   
+  
+  plot_folder <- file.path(
+    OUTPUT_FOLDER,
+    "results",
+    "WholeGenome",
+    "plots")
+  dir.create(plot_folder, recursive = TRUE, showWarnings = FALSE)   
+  
+  
   for (s in 1:length(state_names)) {
     print(s)
     data <-
@@ -2841,11 +3035,7 @@ if (compute_make_plots) {
 
   
   ggsave(
-    filename = file.path(
-      OUTPUT_FOLDER,
-      "results",
-      "WholeGenome",
-      "plots",
+    filename = file.path(plot_folder,
       paste("100pie_chart H3K27Ac", "png", sep = ".")
     )
     ,
@@ -2914,7 +3104,7 @@ if (compute_make_plots) {
              
 }
 
-# done25 state_dependen_analysis --------------------------------------------------------
+# done26 state_dependen_analysis --------------------------------------------------------
 if (state_dependen_analysis) {
   # load data
   load_variable_if_not_exists(
@@ -3142,7 +3332,7 @@ if (FALSE) {
   min_delta <- 0.5
   max_q <- 0.5
   
-  ONLY_ANCIENT <- TRUE
+  ONLY_ANCIENT <- FALSE
   
   if(ONLY_ANCIENT){
     load_variable_if_not_exists(
