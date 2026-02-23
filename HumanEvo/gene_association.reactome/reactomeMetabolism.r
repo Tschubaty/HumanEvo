@@ -644,26 +644,25 @@ to_entrez <- function(x) {
 library(readxl)
 
 # ---- Paths ----
-file_S2 <- "C:/Users/Batyrev/Dropbox/R42v/Table S2 significant CpG [1b].xlsx"
-file_S5 <- "C:/Users/Batyrev/Dropbox/R42v/Table S5 significant CpG [2b].xlsx"
+file_S2 <- "C:/Users/Batyrev/Dropbox/R45/S2_GeneHancer_double_elite.xlsx"
+file_S5 <- "C:/Users/Batyrev/Dropbox/R45/S5_GeneHancer_double_elite.xlsx"
 
 # ---- Analysis 1 foreground ----
-fg1_symbols <- read_excel(file_S2, sheet = 1) |>
-  dplyr::pull(GeneAnnotation) |>
+fg1_symbols <- read_excel(file_S2, sheet = 2) |>
+  dplyr::pull(symbol) |>
   unique()
 
 # ---- Analysis 2 foreground ----
-fg2_symbols <- read_excel(file_S5, sheet = 1) |>
-  dplyr::pull(GeneAnnotation) |>
+fg2_symbols <- read_excel(file_S5, sheet = 2) |>
+  dplyr::pull(symbol) |>
   unique()
 
+file_crisper <- "C:/Users/Batyrev/Dropbox/R45/eran_v2_422_Xtended_Induced_Steatotic.csv"
+
 # ---- CRISPR tested genes ----
-crispr_symbols <- read_excel(file_S5, sheet = 2) |>
-  dplyr::pull("Functional validation of candidate genes using a pooled CRISPR knockout screen in human hepatocytes") |>
-  as.character() |>
-  trimws() |>
-  (\(x) x[!is.na(x) & x != ""])() |>
-  unique()
+crispr_df <- read.csv(file = file_crisper,header = TRUE) 
+
+crispr_symbols <- crispr_df$gene[ !is.na(crispr_df$beta_score)]
 
 #
 fg1_entrez_map <- to_entrez(fg1_symbols)
