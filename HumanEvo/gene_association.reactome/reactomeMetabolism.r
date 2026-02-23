@@ -888,14 +888,138 @@ dev.off()
 cat("\nSaved:\n", pdf_file, "\n", png_file, "\n")
 
 
-################################# Metabolic enrichment vs analysis-matched background
-# Key reviewer-facing statistical test
+# ################################# Metabolic enrichment vs analysis-matched background
+# # Key reviewer-facing statistical test
+# #
+# # H0: foreground metabolic fraction ≤ background metabolic fraction
+# # H1: foreground metabolic fraction > background metabolic fraction
+# #
+# # Universe: GH_bg_entrez (H3K27ac-matched background)
+# # Metabolic definition: Reactome Metabolism (root + descendants)
+# 
+# library(data.table)
+# 
+# # --------------------------------------------------
+# # 1) Define analysis-matched universe
+# # --------------------------------------------------
+# universe <- unique(as.integer(GH_bg_entrez))
+# universe <- universe[!is.na(universe)]
+# 
+# # Restrict Reactome metabolism to universe
+# reactome_met_u <- intersect(
+#   universe,
+#   unique(as.integer(reactome_met))
+# )
+# reactome_met_u <- reactome_met_u[!is.na(reactome_met_u)]
+# 
+# U <- length(universe)
+# M <- length(reactome_met_u)
+# bg_rate <- M / U
+# 
+# cat("\nAnalysis-matched background (GH_bg_entrez)\n")
+# cat("Universe size:", U, "\n")
+# cat("Metabolic genes in universe:", M,
+#     sprintf("(%.4f)\n", bg_rate))
+# 
+# # --------------------------------------------------
+# # 2) One-sided Fisher enrichment test
+# # --------------------------------------------------
+# fg_enrichment_test <- function(set_name, fg_vec, universe, reactome_met_u) {
+#   
+#   fg <- unique(as.integer(fg_vec))
+#   fg <- fg[!is.na(fg)]
+#   
+#   # IMPORTANT: restrict foreground to universe
+#   fg <- intersect(fg, universe)
+#   
+#   n <- length(fg)
+#   k <- length(intersect(fg, reactome_met_u))
+#   
+#   # 2x2 contingency table
+#   #                metabolic   non-metabolic
+#   # foreground        k         n-k
+#   # background      M-k       (U-M)-(n-k)
+#   
+#   mat <- matrix(
+#     c(k, n - k,
+#       M - k, (U - M) - (n - k)),
+#     nrow = 2,
+#     byrow = TRUE
+#   )
+#   
+#   dimnames(mat) <- list(
+#     group  = c("foreground", "background_rest"),
+#     status = c("metabolic", "non_metabolic")
+#   )
+#   
+#   ft <- fisher.test(mat, alternative = "greater")
+#   
+#   fg_rate <- if (n == 0) NA_real_ else k / n
+#   expected <- n * (M / U)
+#   fold_enrichment <- ifelse(expected == 0, NA_real_, k / expected)
+#   
+#   data.table(
+#     set = set_name,
+#     fg_genes_in_universe = n,
+#     fg_metabolic = k,
+#     fg_fraction = fg_rate,
+#     bg_fraction = M / U,
+#     expected_metabolic = expected,
+#     fold_enrichment = fold_enrichment,
+#     odds_ratio = unname(ft$estimate),
+#     p_enrichment = ft$p.value
+#   )
+# }
+# 
+# # --------------------------------------------------
+# # 3) Run ONLY the two CpG foreground sets
+# # --------------------------------------------------
+# res <- rbindlist(list(
+#   fg_enrichment_test("CpGs 1b", fg1_entrez, universe, reactome_met_u),
+#   fg_enrichment_test("CpGs 2b", fg2_entrez, universe, reactome_met_u)
+# ), use.names = TRUE, fill = TRUE)
+# 
+# # --------------------------------------------------
+# # 4) Pretty output
+# # --------------------------------------------------
+# res_print <- copy(res)
+# res_print[, `:=`(
+#   fg_fraction = round(fg_fraction, 4),
+#   bg_fraction = round(bg_fraction, 4),
+#   expected_metabolic = round(expected_metabolic, 2),
+#   fold_enrichment = round(fold_enrichment, 2),
+#   odds_ratio = round(odds_ratio, 3),
+#   p_enrichment = signif(p_enrichment, 3)
+# )]
+# 
+# cat("\nMetabolic enrichment vs H3K27ac-matched background (one-sided Fisher)\n")
+# print(res_print)
+# 
+# # Optional save
+# fwrite(
+#   res,
+#   "metabolic_enrichment_fisher_vs_GH_bg_entrez_foregrounds_only.tsv",
+#   sep = "\t"
+# )
+
+################################# Metabolic enrichment test (CRISPR ONLY)
+# Reviewer-facing statistical test
 #
-# H0: foreground metabolic fraction ≤ background metabolic fraction
-# H1: foreground metabolic fraction > background metabolic fraction
+# H0: CRISPR-set metabolic fraction ≤ background metabolic fraction
+# H1: CRISPR-set metabolic fraction > background metabolic fraction
 #
-# Universe: GH_bg_entrez (H3K27ac-matched background)
-# Metabolic definition: Reactome Metabolism (root + descendants)
+# Universe: GH_bg_entrez (H3K27ac-matched background from your CpG->gene pipeline)
+# Metabolic definition: Reactome Metabolism (root + descendants) = reactome_met
+#
+# Assumes these already exist as vectors of Entrez IDs:
+#   GH_bg_entrez   = background universe (Entrez IDs)
+#   reactome_met   = Reactome "metabolism" Entrez IDs
+#   crispr_entrez  = CRISPR tested genes (Entrez IDs, mapped from symbols)
+#
+# Output:
+#   - prints universe stats
+#   - prints CRISPR enrichment result
+#   - saves TSV
 
 library(data.table)
 
@@ -918,11 +1042,10 @@ bg_rate <- M / U
 
 cat("\nAnalysis-matched background (GH_bg_entrez)\n")
 cat("Universe size:", U, "\n")
-cat("Metabolic genes in universe:", M,
-    sprintf("(%.4f)\n", bg_rate))
+cat("Metabolic genes in universe:", M, sprintf("(%.4f)\n", bg_rate))
 
 # --------------------------------------------------
-# 2) One-sided Fisher enrichment test
+# 2) One-sided Fisher enrichment test (CRISPR only)
 # --------------------------------------------------
 fg_enrichment_test <- function(set_name, fg_vec, universe, reactome_met_u) {
   
@@ -935,11 +1058,13 @@ fg_enrichment_test <- function(set_name, fg_vec, universe, reactome_met_u) {
   n <- length(fg)
   k <- length(intersect(fg, reactome_met_u))
   
-  # 2x2 contingency table
+  U <- length(universe)
+  M <- length(reactome_met_u)
+  
+  # 2x2 contingency table:
   #                metabolic   non-metabolic
   # foreground        k         n-k
   # background      M-k       (U-M)-(n-k)
-  
   mat <- matrix(
     c(k, n - k,
       M - k, (U - M) - (n - k)),
@@ -971,16 +1096,10 @@ fg_enrichment_test <- function(set_name, fg_vec, universe, reactome_met_u) {
   )
 }
 
-# --------------------------------------------------
-# 3) Run ONLY the two CpG foreground sets
-# --------------------------------------------------
-res <- rbindlist(list(
-  fg_enrichment_test("CpGs 1b", fg1_entrez, universe, reactome_met_u),
-  fg_enrichment_test("CpGs 2b", fg2_entrez, universe, reactome_met_u)
-), use.names = TRUE, fill = TRUE)
+res <- fg_enrichment_test("CRISPR", crispr_entrez, universe, reactome_met_u)
 
 # --------------------------------------------------
-# 4) Pretty output
+# 3) Pretty output + save
 # --------------------------------------------------
 res_print <- copy(res)
 res_print[, `:=`(
@@ -995,9 +1114,204 @@ res_print[, `:=`(
 cat("\nMetabolic enrichment vs H3K27ac-matched background (one-sided Fisher)\n")
 print(res_print)
 
-# Optional save
 fwrite(
   res,
-  "metabolic_enrichment_fisher_vs_GH_bg_entrez_foregrounds_only.tsv",
+  "metabolic_enrichment_fisher_vs_GH_bg_entrez_CRISPR_only.tsv",
   sep = "\t"
 )
+
+
+## Requires these vectors already exist:
+## GH_bg_entrez      = background universe Entrez IDs (numeric/integer)
+## reactome_met      = Reactome metabolism Entrez IDs (numeric/integer)
+## crispr_entrez     = CRISPR test set Entrez IDs (numeric/integer)
+
+library(data.table)
+
+# Universe
+universe <- unique(as.integer(GH_bg_entrez))
+universe <- universe[!is.na(universe)]
+
+# Metabolism labels restricted to universe
+reactome_met_u <- intersect(universe, unique(as.integer(reactome_met)))
+reactome_met_u <- reactome_met_u[!is.na(reactome_met_u)]
+
+U <- length(universe)
+M <- length(reactome_met_u)
+
+# CRISPR restricted to universe
+fg <- unique(as.integer(crispr_entrez))
+fg <- fg[!is.na(fg)]
+fg <- intersect(fg, universe)
+
+n <- length(fg)
+k <- length(intersect(fg, reactome_met_u))
+
+mat <- matrix(
+  c(k, n-k,
+    M-k, (U-M)-(n-k)),
+  nrow=2, byrow=TRUE,
+  dimnames=list(group=c("CRISPR","background_rest"),
+                status=c("metabolic","non_metabolic"))
+)
+
+ft <- fisher.test(mat, alternative="greater")  # enrichment
+
+cat("\nCRISPR enrichment vs H3K27ac-matched universe\n")
+cat("Universe U =", U, "  Metabolic M =", M, sprintf(" (%.4f)\n", M/U))
+cat("CRISPR n =", n, "  metabolic k =", k, sprintf(" (%.4f)\n", k/max(1,n)))
+cat("Expected metabolic =", round(n*(M/U),2), "\n")
+cat("Fold enrichment =", round(k / (n*(M/U)), 2), "\n")
+cat("Odds ratio =", unname(ft$estimate), "\n")
+cat("P (one-sided, enrichment) =", ft$p.value, "\n\n")
+
+
+suppressPackageStartupMessages({
+  library(data.table)
+  library(readxl)
+  library(openxlsx)
+  library(AnnotationDbi)
+  library(org.Hs.eg.db)
+})
+
+# ----------------------------
+# INPUTS: set your paths
+# ----------------------------
+file_S5   <- "C:/Users/Batyrev/Dropbox/R43/Table S5 significant CpG [2b].xlsx"
+
+file_map  <- "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/gene_association.reactome/NCBI2Reactome_All_Levels.txt"
+file_pw   <- "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/gene_association.reactome/ReactomePathways.txt"
+file_rel  <- "C:/Users/Batyrev/Documents/GitHub/HumanEvo/HumanEvo/gene_association.reactome/ReactomePathwaysRelation.txt"
+
+stopifnot(file.exists(file_S5), file.exists(file_map), file.exists(file_pw), file.exists(file_rel))
+
+# ----------------------------
+# 1) Build metabolic pathway ID set (Metabolism root + descendants)
+# ----------------------------
+pw <- fread(file_pw, sep="\t", header=FALSE, quote="",
+            col.names=c("pathway_id","pathway_name","species"))
+pw_hsa_ids <- pw[species=="Homo sapiens", unique(pathway_id)]
+root_id <- pw[species=="Homo sapiens" & pathway_name=="Metabolism", pathway_id]
+stopifnot(length(root_id)==1)
+
+rel <- fread(file_rel, sep="\t", header=FALSE, quote="",
+             col.names=c("parent","child"))
+rel_hsa <- rel[parent %in% pw_hsa_ids & child %in% pw_hsa_ids]
+
+met_paths <- root_id
+frontier <- root_id
+repeat {
+  kids <- unique(rel_hsa[parent %in% frontier, child])
+  kids <- setdiff(kids, met_paths)
+  if (!length(kids)) break
+  met_paths <- c(met_paths, kids)
+  frontier <- kids
+}
+met_paths <- unique(met_paths)
+
+# helper: leaf pathways within a set (most specific among those assigned)
+get_leaf_paths <- function(path_ids, rel_hsa) {
+  path_ids <- unique(path_ids)
+  # a pathway is non-leaf if it is a parent of another pathway in path_ids
+  parents_in_set <- unique(rel_hsa[parent %in% path_ids & child %in% path_ids, parent])
+  setdiff(path_ids, parents_in_set)
+}
+
+# ----------------------------
+# 2) Read NCBI2Reactome mapping and keep ONLY human + metabolic pathways
+# ----------------------------
+map <- fread(file_map, sep="\t", header=FALSE, quote="", fill=TRUE)
+setnames(map, c("entrez_id","pathway_id","url","pathway_name","evidence","species"))
+
+map <- map[species=="Homo sapiens" & pathway_id %in% met_paths]
+map[, entrez_id := suppressWarnings(as.integer(entrez_id))]
+map <- map[!is.na(entrez_id)]
+
+# collapse: entrez -> list of pathway_id + pathway_name (metabolic only)
+# we'll compute leaf pathways per gene using rel_hsa
+map_by_gene <- map[, .(
+  path_ids   = list(unique(pathway_id)),
+  path_names = list(unique(pathway_name))
+), by=entrez_id]
+
+# ----------------------------
+# 3) Map gene symbols -> Entrez (robust: ENSG / SYMBOL / ALIAS)
+# ----------------------------
+to_entrez_one <- function(x) {
+  x <- trimws(as.character(x))
+  if (is.na(x) || x=="") return(NA_integer_)
+  
+  # ENSG normalization (strip version)
+  if (grepl("^ENSG\\d+", x)) {
+    x0 <- sub("^(ENSG\\d+).*", "\\1", x)
+    m <- tryCatch(
+      AnnotationDbi::select(org.Hs.eg.db, keys=x0, keytype="ENSEMBL", columns="ENTREZID"),
+      error=function(e) NULL
+    )
+    if (!is.null(m) && any(!is.na(m$ENTREZID))) return(as.integer(m$ENTREZID[which(!is.na(m$ENTREZID))[1]]))
+  }
+  
+  m <- tryCatch(
+    AnnotationDbi::select(org.Hs.eg.db, keys=x, keytype="SYMBOL", columns="ENTREZID"),
+    error=function(e) NULL
+  )
+  if (!is.null(m) && any(!is.na(m$ENTREZID))) return(as.integer(m$ENTREZID[which(!is.na(m$ENTREZID))[1]]))
+  
+  m <- tryCatch(
+    AnnotationDbi::select(org.Hs.eg.db, keys=x, keytype="ALIAS", columns="ENTREZID"),
+    error=function(e) NULL
+  )
+  if (!is.null(m) && any(!is.na(m$ENTREZID))) return(as.integer(m$ENTREZID[which(!is.na(m$ENTREZID))[1]]))
+  
+  NA_integer_
+}
+
+# ----------------------------
+# 4) Load Table S5 (sheet 2), add pathway column, write new xlsx
+# ----------------------------
+wb <- loadWorkbook(file_S5)
+sheet2_name <- names(wb)[2]  # your "second sheet" (adjust if needed)
+
+df2 <- read.xlsx(wb, sheet=sheet2_name)
+
+# Identify the CRISPR gene column (your long header)
+gene_col_name <- "Functional.validation.of.candidate.genes.using.a.pooled.CRISPR.knockout.screen.in.human.hepatocytes"
+stopifnot(gene_col_name %in% colnames(df2))
+
+genes <- trimws(as.character(df2[[gene_col_name]]))
+
+# For each gene: Entrez -> metabolic leaf pathway names
+metabolic_pathway <- vapply(genes, function(g) {
+  if (is.na(g) || g=="") return("")
+  eid <- to_entrez_one(g)
+  if (is.na(eid)) return("")
+  
+  rec <- map_by_gene[entrez_id == eid]
+  if (!nrow(rec)) return("")
+  
+  # compute leaf IDs among this gene’s metabolic pathways
+  leaf_ids <- get_leaf_paths(unlist(rec$path_ids[[1]]), rel_hsa)
+  
+  # map leaf IDs -> names (from pw table; safest)
+  leaf_names <- pw[pathway_id %in% leaf_ids & species=="Homo sapiens", unique(pathway_name)]
+  if (!length(leaf_names)) leaf_names <- rec$path_names[[1]]  # fallback
+  
+  paste(unique(leaf_names), collapse="; ")
+}, character(1))
+
+# Add column right after gene column
+new_col <- "metabolic pathway (Reactome Metabolism descendants)"
+insert_pos <- match(gene_col_name, colnames(df2)) + 1
+df2 <- cbind(df2[1:(insert_pos-1)], setNames(data.frame(metabolic_pathway), new_col), df2[insert_pos:ncol(df2)])
+
+# Write back to workbook (replace sheet content)
+removeWorksheet(wb, sheet2_name)
+addWorksheet(wb, sheet2_name)
+writeData(wb, sheet2_name, df2)
+
+out_file <- sub("\\.xlsx$", "_WITH_metabolic_pathways.xlsx", file_S5)
+saveWorkbook(wb, out_file, overwrite=TRUE)
+
+cat("\nWrote updated file:\n", out_file, "\n")
+cat("Metabolism root:", root_id, " | descendant pathways:", length(met_paths), "\n")
+
